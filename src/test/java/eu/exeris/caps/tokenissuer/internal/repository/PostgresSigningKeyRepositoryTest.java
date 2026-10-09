@@ -93,6 +93,41 @@ class PostgresSigningKeyRepositoryTest {
         assertThat(stmt.boundParameters.get(1)).isEqualTo(cutoff);
     }
 
+    @Test
+    @DisplayName("save encrypts private key with AES-GCM envelope magic prefix")
+    void saveEncryptsPrivateKeyWithEnvelopeMagic() {
+        byte[] rawPriv = new byte[]{1, 2, 3, 4, 5, 6, 7, 8};
+        SigningKeyRecord record = new SigningKeyRecord(
+                "k-enc-1",
+                "EdDSA",
+                "{}",
+                new byte[32],
+                rawPriv,
+                KeyState.ACTIVE,
+                Instant.now(),
+                Instant.now().plus(Duration.ofDays(1)),
+                null
+        );
+
+        repository.save(record);
+
+        CapturingStatement stmt = tx.executedStatements.get(0);
+        byte[] stored = (byte[]) stmt.boundParameters.get(4);
+        assertThat(stored).isNotEqualTo(rawPriv);
+        assertThat(stored).startsWith(new byte[]{0x45, 0x4E, 0x56, 0x01});
+    }
+
+    @Test
+    @DisplayName("rotateUnderClusterLock acquires pg_advisory_xact_lock")
+    void rotateUnderClusterLockAcquiresAdvisoryLock() {
+        var result = repository.rotateUnderClusterLock(() -> null);
+
+        assertThat(tx.executedStatements).hasSize(1);
+        CapturingStatement stmt = tx.executedStatements.get(0);
+        assertThat(stmt.sql).contains("pg_advisory_xact_lock");
+        assertThat(stmt.boundParameters.get(0)).isEqualTo(PostgresSigningKeyRepository.EXERIS_ROTATION_LOCK_ID);
+    }
+
     private static final class CapturingTransactionalExecutor implements TransactionalExecutor {
         final List<CapturingStatement> executedStatements = new ArrayList<>();
         Supplier<QueryResult> queryResultSupplier;

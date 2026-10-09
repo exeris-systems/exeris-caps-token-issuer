@@ -70,4 +70,17 @@ public interface SigningKeyRepository {
      * @return number of deleted records
      */
     int deleteRetiredBefore(Instant cutoff);
+
+    /**
+     * Executes rotation action under a transactional cluster advisory lock.
+     *
+     * @param rotationLogic rotation logic callback
+     * @return rotated or active key info
+     */
+    default eu.exeris.caps.tokenissuer.api.SigningKeyInfo rotateUnderClusterLock(
+            java.util.function.Supplier<eu.exeris.caps.tokenissuer.api.SigningKeyInfo> rotationLogic
+    ) {
+        return rotationLogic.get();
+    }
 }
+

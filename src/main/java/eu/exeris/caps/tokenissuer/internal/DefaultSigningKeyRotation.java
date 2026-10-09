@@ -91,54 +91,65 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
     }
 
     @Override
-    public synchronized SigningKeyInfo rotateKeys() {
-        try {
-            Instant now = Instant.now();
-            Optional<SigningKeyRecord> currentActive = repository.findActive();
+    public SigningKeyInfo rotateKeys() {
+        Optional<SigningKeyRecord> priorActive = repository.findActive();
+        String priorActiveKid = priorActive.map(SigningKeyRecord::kid).orElse(null);
 
-            // 1. Generate new Ed25519 key pair
-            KeyPair keyPair = Ed25519Signer.generateKeyPair();
-            byte[] rawPub = Ed25519Signer.extractRawPublicKeyBytes(keyPair.getPublic());
-            byte[] privPkcs8 = keyPair.getPrivate().getEncoded();
+        return repository.rotateUnderClusterLock(() -> {
+            synchronized (this) {
+                try {
+                    Instant now = Instant.now();
+                    Optional<SigningKeyRecord> currentActive = repository.findActive();
 
-            String kid = "k-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-            Map<String, String> jwkParams = Rfc8037JwksBuilder.buildJwkParams(kid, rawPub);
-            String jwkJson = Rfc8037JwksBuilder.serializeJwk(jwkParams);
+                    if (priorActiveKid != null && currentActive.isPresent() && !currentActive.get().kid().equals(priorActiveKid)) {
+                        return currentActive.get().toInfo();
+                    }
 
-            Instant expiresAt = now.plus(policy.keyTtl());
+                    // 1. Generate new Ed25519 key pair
+                    KeyPair keyPair = Ed25519Signer.generateKeyPair();
+                    byte[] rawPub = Ed25519Signer.extractRawPublicKeyBytes(keyPair.getPublic());
+                    byte[] privPkcs8 = keyPair.getPrivate().getEncoded();
 
-            // 2. Mark previous key as RETIRING
-            if (currentActive.isPresent()) {
-                SigningKeyRecord old = currentActive.get();
-                Instant retiredAt = now.plus(policy.overlapWindow());
-                repository.updateState(old.kid(), KeyState.RETIRING, retiredAt);
-                if (auditBridge != null) {
-                    auditBridge.logKeyRotated(kid, old.kid());
-                }
-            } else {
-                if (auditBridge != null) {
-                    auditBridge.logKeyGenerated(kid);
+                    String kid = "k-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+                    Map<String, String> jwkParams = Rfc8037JwksBuilder.buildJwkParams(kid, rawPub);
+                    String jwkJson = Rfc8037JwksBuilder.serializeJwk(jwkParams);
+
+                    Instant expiresAt = now.plus(policy.keyTtl());
+
+                    // 2. Mark previous key as RETIRING
+                    if (currentActive.isPresent()) {
+                        SigningKeyRecord old = currentActive.get();
+                        Instant retiredAt = now.plus(policy.overlapWindow());
+                        repository.updateState(old.kid(), KeyState.RETIRING, retiredAt);
+                        if (auditBridge != null) {
+                            auditBridge.logKeyRotated(kid, old.kid());
+                        }
+                    } else {
+                        if (auditBridge != null) {
+                            auditBridge.logKeyGenerated(kid);
+                        }
+                    }
+
+                    // 3. Save new active key
+                    SigningKeyRecord newActive = new SigningKeyRecord(
+                            kid,
+                            Ed25519Signer.JWT_ALGORITHM,
+                            jwkJson,
+                            rawPub,
+                            privPkcs8,
+                            KeyState.ACTIVE,
+                            now,
+                            expiresAt,
+                            null
+                    );
+                    repository.save(newActive);
+
+                    return newActive.toInfo();
+                } catch (Exception e) {
+                    throw new KeyRotationException("Failed to rotate signing keys", e);
                 }
             }
-
-            // 3. Save new active key
-            SigningKeyRecord newActive = new SigningKeyRecord(
-                    kid,
-                    Ed25519Signer.JWT_ALGORITHM,
-                    jwkJson,
-                    rawPub,
-                    privPkcs8,
-                    KeyState.ACTIVE,
-                    now,
-                    expiresAt,
-                    null
-            );
-            repository.save(newActive);
-
-            return newActive.toInfo();
-        } catch (Exception e) {
-            throw new KeyRotationException("Failed to rotate signing keys", e);
-        }
+        });
     }
 
     @Override
