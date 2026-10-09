@@ -1,0 +1,94 @@
+{
+  "schemaVersion" : 2,
+  "stamp" : {
+    "validated" : true,
+    "compositionVersion" : "0.0.0",
+    "contentBinding" : "sha256:0d988b25bae627d00ba2afb00538cf59909cb218a5d78bfbf097ef6ba38c8939"
+  },
+  "modules" : [
+    {
+      "name" : "TokenIssuerModule",
+      "packageName" : "eu.exeris.caps.tokenissuer",
+      "qualifiedName" : "eu.exeris.caps.tokenissuer.TokenIssuerModule",
+      "module" : {
+        "provides" : [
+          {
+            "service" : "eu.exeris.caps.tokenissuer.api.AccessTokenIssuer",
+            "version" : "1.0.0"
+          },
+          {
+            "service" : "eu.exeris.caps.tokenissuer.api.JwksPublisher",
+            "version" : "1.0.0"
+          },
+          {
+            "service" : "eu.exeris.caps.tokenissuer.api.SigningKeyRotation",
+            "version" : "1.0.0"
+          }
+        ],
+        "requires" : [
+          {
+            "service" : "eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry",
+            "optional" : true
+          },
+          {
+            "service" : "eu.exeris.kernel.spi.persistence.TransactionalExecutor",
+            "optional" : true
+          },
+          {
+            "service" : "eu.exeris.kernel.spi.scheduling.JobScheduler",
+            "optional" : true
+          },
+          {
+            "service" : "eu.exeris.caps.audittrail.api.AuditLogSink",
+            "versionRange" : "[1.0.0,2.0.0)",
+            "optional" : true
+          }
+        ],
+        "lifecycleOwner" : "eu.exeris.caps.tokenissuer.TokenIssuerModule"
+      }
+    }
+  ],
+  "resolutions" : [
+    {
+      "module" : "eu.exeris.caps.tokenissuer.TokenIssuerModule",
+      "service" : "eu.exeris.caps.audittrail.api.AuditLogSink",
+      "versionRange" : "[1.0.0,2.0.0)",
+      "optional" : true,
+      "satisfied" : false,
+      "providers" : [ ]
+    },
+    {
+      "module" : "eu.exeris.caps.tokenissuer.TokenIssuerModule",
+      "service" : "eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry",
+      "versionRange" : null,
+      "optional" : true,
+      "satisfied" : false,
+      "providers" : [ ]
+    },
+    {
+      "module" : "eu.exeris.caps.tokenissuer.TokenIssuerModule",
+      "service" : "eu.exeris.kernel.spi.persistence.TransactionalExecutor",
+      "versionRange" : null,
+      "optional" : true,
+      "satisfied" : false,
+      "providers" : [ ]
+    },
+    {
+      "module" : "eu.exeris.caps.tokenissuer.TokenIssuerModule",
+      "service" : "eu.exeris.kernel.spi.scheduling.JobScheduler",
+      "versionRange" : null,
+      "optional" : true,
+      "satisfied" : false,
+      "providers" : [ ]
+    }
+  ],
+  "initOrder" : [
+    "eu.exeris.caps.tokenissuer.TokenIssuerModule"
+  ],
+  "warnings" : [
+    "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.caps.audittrail.api.AuditLogSink version [1.0.0,2.0.0) but no @CapabilityModule provides it (optional — skipped)",
+    "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry but no @CapabilityModule provides it (optional — skipped)",
+    "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.kernel.spi.persistence.TransactionalExecutor but no @CapabilityModule provides it (optional — skipped)",
+    "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.kernel.spi.scheduling.JobScheduler but no @CapabilityModule provides it (optional — skipped)"
+  ]
+}
