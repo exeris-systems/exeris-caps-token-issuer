@@ -2,139 +2,77 @@ package eu.exeris.caps.tokenissuer.internal.repository;
 
 import eu.exeris.caps.tokenissuer.api.KeyState;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
+import eu.exeris.caps.tokenissuer.internal.custody.KeyEncryptionKeyring;
+import eu.exeris.caps.tokenissuer.internal.custody.SigningKeyEnvelope;
 import eu.exeris.kernel.spi.persistence.PersistenceStatement;
 import eu.exeris.kernel.spi.persistence.QueryResult;
 import eu.exeris.kernel.spi.persistence.RowCursor;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
 
-import javax.crypto.Cipher;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * PostgreSQL implementation of {@link SigningKeyRepository} using {@link TransactionalExecutor}.
+ * PostgreSQL implementation of {@link SigningKeyRepository} over the kernel {@link TransactionalExecutor}.
+ *
+ * <p>Private keys are stored only as {@link SigningKeyEnvelope} envelopes sealed under the
+ * configured {@link KeyEncryptionKeyring}; the repository cannot be built without one, and a row
+ * whose private key does not open under it is refused on read rather than returned as is.
  *
  * @since 0.1.0
  */
 public final class PostgresSigningKeyRepository implements SigningKeyRepository {
 
     public static final long EXERIS_ROTATION_LOCK_ID = 5001272635418181633L;
-    private static final byte[] ENVELOPE_MAGIC = new byte[]{0x45, 0x4E, 0x56, 0x01}; // "ENV\1"
-    private static final int GCM_IV_LENGTH = 12;
-    private static final int GCM_TAG_LENGTH_BITS = 128;
 
     private final TransactionalExecutor tx;
-    private final SecretKey masterKey;
-    private final SecureRandom secureRandom = new SecureRandom();
+    private final SigningKeyEnvelope envelope;
 
-    public PostgresSigningKeyRepository(TransactionalExecutor tx) {
-        this(tx, resolveDefaultMasterKey());
-    }
-
-    public PostgresSigningKeyRepository(TransactionalExecutor tx, byte[] masterKeyBytes) {
-        this(tx, new SecretKeySpec(Objects.requireNonNull(masterKeyBytes, "masterKeyBytes must not be null"), "AES"));
-    }
-
-    public PostgresSigningKeyRepository(TransactionalExecutor tx, SecretKey masterKey) {
+    public PostgresSigningKeyRepository(TransactionalExecutor tx, KeyEncryptionKeyring keyring) {
         this.tx = Objects.requireNonNull(tx, "TransactionalExecutor must not be null");
-        this.masterKey = Objects.requireNonNull(masterKey, "masterKey must not be null");
+        this.envelope = new SigningKeyEnvelope(Objects.requireNonNull(keyring, "keyring must not be null"));
     }
 
-    private static SecretKey resolveDefaultMasterKey() {
-        String env = System.getenv("EXERIS_MASTER_KEY");
-        if (env != null && !env.isBlank()) {
-            return parseKey(env);
-        }
-        String prop = System.getProperty("exeris.master.key");
-        if (prop != null && !prop.isBlank()) {
-            return parseKey(prop);
-        }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] keyBytes = digest.digest("exeris-default-signing-key-envelope-secret".getBytes(StandardCharsets.UTF_8));
-            return new SecretKeySpec(keyBytes, "AES");
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to initialize default master key", e);
-        }
-    }
-
-    private static SecretKey parseKey(String keyStr) {
-        try {
-            byte[] decoded = Base64.getDecoder().decode(keyStr.trim());
-            if (decoded.length == 32) {
-                return new SecretKeySpec(decoded, "AES");
+    /**
+     * Re-seals every stored private key whose envelope names a KEK other than the active one, so the
+     * older KEK can be removed from the keyring afterwards.
+     *
+     * @return number of records re-sealed
+     */
+    public int resealWithActiveKek() {
+        AtomicInteger count = new AtomicInteger();
+        rotateUnderClusterLock(() -> {
+            String activeKekId = envelope.activeKekId();
+            List<String> stale = tx.query(conn -> {
+                try (PersistenceStatement stmt = conn.prepare("SELECT kid, private_key_pkcs8 FROM exeris_signing_keys")) {
+                    try (QueryResult rs = stmt.executeQuery()) {
+                        List<String> kids = new ArrayList<>();
+                        while (rs.next()) {
+                            RowCursor row = rs.row();
+                            if (!activeKekId.equals(SigningKeyEnvelope.kekIdOf(row.getBytes(1)))) {
+                                kids.add(row.getString(0));
+                            }
+                        }
+                        return kids;
+                    }
+                }
+            });
+            for (String kid : stale) {
+                findByKid(kid).ifPresent(record -> {
+                    save(record);
+                    count.incrementAndGet();
+                });
             }
-        } catch (Exception ignored) {
-        }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] keyBytes = digest.digest(keyStr.getBytes(StandardCharsets.UTF_8));
-            return new SecretKeySpec(keyBytes, "AES");
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to parse master key", e);
-        }
-    }
-
-    private byte[] encryptPrivateKey(byte[] plain) {
-        if (plain == null || plain.length == 0) {
-            return plain;
-        }
-        try {
-            byte[] iv = new byte[GCM_IV_LENGTH];
-            secureRandom.nextBytes(iv);
-
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, masterKey, new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
-            byte[] ciphertext = cipher.doFinal(plain);
-
-            byte[] result = new byte[ENVELOPE_MAGIC.length + GCM_IV_LENGTH + ciphertext.length];
-            System.arraycopy(ENVELOPE_MAGIC, 0, result, 0, ENVELOPE_MAGIC.length);
-            System.arraycopy(iv, 0, result, ENVELOPE_MAGIC.length, GCM_IV_LENGTH);
-            System.arraycopy(ciphertext, 0, result, ENVELOPE_MAGIC.length + GCM_IV_LENGTH, ciphertext.length);
-            return result;
-        } catch (Exception e) {
-            throw new IllegalStateException("Envelope encryption of private key failed", e);
-        }
-    }
-
-    private byte[] decryptPrivateKey(byte[] stored) {
-        if (stored == null || stored.length < ENVELOPE_MAGIC.length + GCM_IV_LENGTH) {
-            return stored;
-        }
-        boolean hasMagic = true;
-        for (int i = 0; i < ENVELOPE_MAGIC.length; i++) {
-            if (stored[i] != ENVELOPE_MAGIC[i]) {
-                hasMagic = false;
-                break;
-            }
-        }
-        if (!hasMagic) {
-            return stored;
-        }
-        try {
-            byte[] iv = Arrays.copyOfRange(stored, ENVELOPE_MAGIC.length, ENVELOPE_MAGIC.length + GCM_IV_LENGTH);
-            byte[] ciphertext = Arrays.copyOfRange(stored, ENVELOPE_MAGIC.length + GCM_IV_LENGTH, stored.length);
-
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, masterKey, new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
-            return cipher.doFinal(ciphertext);
-        } catch (Exception e) {
-            throw new IllegalStateException("Envelope decryption of private key failed", e);
-        }
+            return null;
+        });
+        return count.get();
     }
 
     @Override
@@ -174,7 +112,7 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
                     .bindString(1, record.algorithm())
                     .bindString(2, record.publicKeyJwkJson())
                     .bindBytes(3, record.publicKeyRawBytes())
-                    .bindBytes(4, encryptPrivateKey(record.privateKeyPkcs8Bytes()))
+                    .bindBytes(4, envelope.seal(record.kid(), record.privateKeyPkcs8Bytes()))
                     .bindString(5, record.state().name())
                     .bindInstant(6, record.createdAt())
                     .bindInstant(7, record.expiresAt());
@@ -316,7 +254,7 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
                 DELETE FROM exeris_signing_keys
                 WHERE state = $1 AND (retired_at < $2 OR (retired_at IS NULL AND expires_at < $2))
                 """;
-        java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger(0);
+        AtomicInteger count = new AtomicInteger(0);
         tx.executeManaged(conn -> {
             try (PersistenceStatement stmt = conn.prepare(sql)) {
                 stmt.bindString(0, KeyState.RETIRED.name());
@@ -332,7 +270,7 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
         String alg = row.getString(1);
         String jwkJson = row.getString(2);
         byte[] pubBytes = row.getBytes(3);
-        byte[] privBytes = decryptPrivateKey(row.getBytes(4));
+        byte[] privBytes = envelope.open(kid, row.getBytes(4));
         KeyState state = KeyState.valueOf(row.getString(5));
         Instant createdAt = row.getInstant(6);
         Instant expiresAt = row.getInstant(7);

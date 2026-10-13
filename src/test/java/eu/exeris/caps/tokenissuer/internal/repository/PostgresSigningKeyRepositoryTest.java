@@ -1,6 +1,10 @@
 package eu.exeris.caps.tokenissuer.internal.repository;
 
 import eu.exeris.caps.tokenissuer.api.KeyState;
+import eu.exeris.caps.tokenissuer.api.exception.SigningKeyCustodyException;
+import eu.exeris.caps.tokenissuer.internal.custody.KeyEncryptionKeyring;
+import eu.exeris.caps.tokenissuer.internal.custody.SigningKeyEnvelope;
+import eu.exeris.caps.tokenissuer.testing.TestSupport;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.PersistenceStatement;
 import eu.exeris.kernel.spi.persistence.QueryResult;
@@ -23,6 +27,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("PostgresSigningKeyRepository Unit Tests")
 class PostgresSigningKeyRepositoryTest {
@@ -33,7 +38,8 @@ class PostgresSigningKeyRepositoryTest {
     @BeforeEach
     void setUp() {
         tx = new CapturingTransactionalExecutor();
-        repository = new PostgresSigningKeyRepository(tx);
+        repository = new PostgresSigningKeyRepository(tx,
+                KeyEncryptionKeyring.parse("TEST", "k1:" + TestSupport.newKek()));
     }
 
     @Test
@@ -94,8 +100,8 @@ class PostgresSigningKeyRepositoryTest {
     }
 
     @Test
-    @DisplayName("save encrypts private key with AES-GCM envelope magic prefix")
-    void saveEncryptsPrivateKeyWithEnvelopeMagic() {
+    @DisplayName("save stores the private key only as a sealed envelope naming the active KEK")
+    void saveSealsPrivateKey() {
         byte[] rawPriv = new byte[]{1, 2, 3, 4, 5, 6, 7, 8};
         SigningKeyRecord record = new SigningKeyRecord(
                 "k-enc-1",
@@ -113,8 +119,31 @@ class PostgresSigningKeyRepositoryTest {
 
         CapturingStatement stmt = tx.executedStatements.get(0);
         byte[] stored = (byte[]) stmt.boundParameters.get(4);
-        assertThat(stored).isNotEqualTo(rawPriv);
-        assertThat(stored).startsWith(new byte[]{0x45, 0x4E, 0x56, 0x01});
+        assertThat(stored).startsWith(new byte[]{'E', 'X', 'K', 0x01});
+        assertThat(SigningKeyEnvelope.kekIdOf(stored)).isEqualTo("k1");
+        assertThat(java.util.Collections.indexOfSubList(toList(stored), toList(rawPriv))).isEqualTo(-1);
+    }
+
+    @Test
+    @DisplayName("a row whose private key is plaintext is refused on read, never passed through")
+    void plaintextRowRefused() {
+        Instant now = Instant.now();
+        tx.queryResultSupplier = () -> new StubQueryResult(List.<Object[]>of(new Object[]{
+                "k-plain", "EdDSA", "{}", new byte[32], new byte[]{0x30, 0x2e, 0x02, 0x01},
+                "ACTIVE", now, now.plus(Duration.ofDays(1)), null}));
+
+        assertThatThrownBy(() -> repository.findByKid("k-plain"))
+                .isInstanceOf(SigningKeyCustodyException.class)
+                .satisfies(e -> assertThat(((SigningKeyCustodyException) e).reason())
+                        .isEqualTo(SigningKeyCustodyException.Reason.NOT_SEALED));
+    }
+
+    private static List<Byte> toList(byte[] bytes) {
+        List<Byte> list = new ArrayList<>(bytes.length);
+        for (byte b : bytes) {
+            list.add(b);
+        }
+        return list;
     }
 
     @Test

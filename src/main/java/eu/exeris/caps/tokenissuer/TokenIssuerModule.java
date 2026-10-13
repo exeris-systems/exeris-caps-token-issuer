@@ -10,6 +10,7 @@ import eu.exeris.caps.tokenissuer.internal.DefaultAccessTokenIssuer;
 import eu.exeris.caps.tokenissuer.internal.DefaultJwksPublisher;
 import eu.exeris.caps.tokenissuer.internal.DefaultSigningKeyRotation;
 import eu.exeris.caps.tokenissuer.internal.audit.TokenIssuerAuditBridge;
+import eu.exeris.caps.tokenissuer.internal.custody.KeyEncryptionKeyring;
 import eu.exeris.caps.tokenissuer.internal.repository.InMemorySigningKeyRepository;
 import eu.exeris.caps.tokenissuer.internal.repository.PostgresSigningKeyRepository;
 import eu.exeris.caps.tokenissuer.internal.repository.SigningKeyRepository;
@@ -64,7 +65,11 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     }
 
     /**
-     * Constructor wiring with kernel and capability SPIs.
+     * Constructor wiring with kernel and capability SPIs. With a {@link TransactionalExecutor} the
+     * signing keys are stored in PostgreSQL, sealed under the key-encryption keyring of
+     * {@code EXERIS_TOKEN_ISSUER_KEKS} or {@code EXERIS_TOKEN_ISSUER_KEKS_FILE}; a missing or
+     * malformed keyring fails construction with a
+     * {@link eu.exeris.caps.tokenissuer.api.exception.TokenIssuerConfigurationException}.
      */
     public TokenIssuerModule(
             TransactionalExecutor tx,
@@ -73,7 +78,9 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
             AuditLogSink auditLogSink
     ) {
         this(
-                tx != null ? new PostgresSigningKeyRepository(tx) : new InMemorySigningKeyRepository(),
+                tx != null
+                        ? new PostgresSigningKeyRepository(tx, KeyEncryptionKeyring.fromEnvironment(System.getenv()))
+                        : new InMemorySigningKeyRepository(),
                 KeyRotationPolicy.defaults(),
                 apiSurfaceRegistry,
                 scheduler,
