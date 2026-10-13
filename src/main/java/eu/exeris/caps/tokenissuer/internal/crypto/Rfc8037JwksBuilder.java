@@ -4,6 +4,7 @@ import eu.exeris.caps.tokenissuer.api.JwksDocument;
 
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,7 +77,7 @@ public final class Rfc8037JwksBuilder {
         Objects.requireNonNull(keyList, "keyList must not be null");
         List<Map<String, String>> defensiveList = new ArrayList<>(keyList.size());
         for (Map<String, String> k : keyList) {
-            defensiveList.add(Map.copyOf(k));
+            defensiveList.add(Collections.unmodifiableMap(new LinkedHashMap<>(k)));
         }
 
         StringBuilder sb = new StringBuilder("{\"keys\":[");

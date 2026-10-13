@@ -9,7 +9,6 @@ import eu.exeris.kernel.spi.persistence.QueryResult;
 import eu.exeris.kernel.spi.persistence.RowCursor;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -172,31 +171,23 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
     }
 
     @Override
-    public List<SigningKeyRecord> findPublishable(Instant now, Duration overlapWindow) {
+    public List<SigningKeyRecord> findPublishable(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
-        Objects.requireNonNull(overlapWindow, "overlapWindow must not be null");
         String sql = """
                 SELECT kid, algorithm, public_key_jwk, public_key_bytes, private_key_pkcs8, state, created_at, expires_at, retired_at
                 FROM exeris_signing_keys
-                WHERE state = 'ACTIVE' OR state = 'RETIRING'
+                WHERE state = $1 OR (state = $2 AND retired_at > $3)
                 ORDER BY created_at DESC
                 """;
         return tx.query(conn -> {
             try (PersistenceStatement stmt = conn.prepare(sql)) {
+                stmt.bindString(0, KeyState.ACTIVE.name())
+                    .bindString(1, KeyState.RETIRING.name())
+                    .bindInstant(2, now);
                 try (QueryResult rs = stmt.executeQuery()) {
                     List<SigningKeyRecord> list = new ArrayList<>();
                     while (rs.next()) {
-                        SigningKeyRecord rec = mapRow(rs.row());
-                        if (rec.state() == KeyState.ACTIVE) {
-                            list.add(rec);
-                        } else if (rec.state() == KeyState.RETIRING) {
-                            Instant effectiveRetire = rec.retiredAt() != null
-                                    ? rec.retiredAt()
-                                    : rec.expiresAt().plus(overlapWindow);
-                            if (now.isBefore(effectiveRetire)) {
-                                list.add(rec);
-                            }
-                        }
+                        list.add(mapRow(rs.row()));
                     }
                     return list;
                 }

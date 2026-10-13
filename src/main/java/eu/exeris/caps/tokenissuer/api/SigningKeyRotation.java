@@ -10,15 +10,26 @@ import java.util.List;
 public interface SigningKeyRotation {
 
     /**
-     * Performs a key rotation: generates a new active Ed25519 key, transitions the existing
-     * active key to retiring (with expiration based on the overlap window), and stores the changes.
+     * Rotates now, whether or not the active key is due: generates a new active Ed25519 key and
+     * moves the previous one to {@link KeyState#RETIRING}, published until
+     * {@code now + maxTokenTtl + clockSkew}. This is the explicit operation for an unscheduled
+     * rotation, such as a suspected key compromise.
      *
      * @return metadata descriptor of the newly generated active key
      */
     SigningKeyInfo rotateKeys();
 
     /**
-     * Retires expired keys whose overlap window has elapsed.
+     * Rotates only when there is no active key or the active key's {@code expiresAt} has passed.
+     *
+     * @return metadata descriptor of the active key after the call
+     * @since 0.2.0
+     */
+    SigningKeyInfo rotateIfDue();
+
+    /**
+     * Moves every {@link KeyState#RETIRING} key whose publication window has ended to
+     * {@link KeyState#RETIRED}.
      *
      * @return number of keys transitioned to retired
      */

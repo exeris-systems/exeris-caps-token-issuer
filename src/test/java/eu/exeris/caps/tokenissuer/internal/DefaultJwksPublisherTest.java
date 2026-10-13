@@ -3,18 +3,23 @@ package eu.exeris.caps.tokenissuer.internal;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRoute;
 import eu.exeris.caps.serviceboundarycore.api.RouteMatch;
-import eu.exeris.caps.tokenissuer.api.JwksDocument;
-import eu.exeris.caps.tokenissuer.api.KeyRotationPolicy;
+import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 import eu.exeris.caps.tokenissuer.internal.boundary.JwksHttpRoute;
 import eu.exeris.caps.tokenissuer.internal.repository.InMemorySigningKeyRepository;
+import eu.exeris.caps.tokenissuer.testing.TestSupport;
+import eu.exeris.caps.tokenissuer.testing.TestSupport.MutableClock;
 import eu.exeris.kernel.spi.http.HttpExchange;
 import eu.exeris.kernel.spi.http.HttpMethod;
+import org.jose4j.json.JsonUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,28 +27,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DefaultJwksPublisherTest {
 
     private InMemorySigningKeyRepository repository;
-    private KeyRotationPolicy policy;
     private DefaultSigningKeyRotation rotation;
     private DefaultJwksPublisher publisher;
 
     @BeforeEach
     void setUp() {
         repository = new InMemorySigningKeyRepository();
-        policy = KeyRotationPolicy.defaults();
-        rotation = new DefaultSigningKeyRotation(repository, policy, null);
-        publisher = new DefaultJwksPublisher(repository, policy);
+        MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        rotation = new DefaultSigningKeyRotation(repository, TestSupport.config(), null, null, clock);
+        publisher = new DefaultJwksPublisher(repository, clock);
     }
 
     @Test
-    @DisplayName("Publishes active and retiring keys in JWKS format")
-    void publishesActiveAndRetiringKeys() {
-        rotation.rotateKeys();
-        rotation.rotateKeys();
+    @DisplayName("every JWK is exactly kty=OKP, crv=Ed25519, alg=EdDSA, use=sig, kid, x (32 bytes) and nothing private")
+    @SuppressWarnings("unchecked")
+    void jwksShape() throws Exception {
+        SigningKeyInfo first = rotation.rotateKeys();
+        SigningKeyInfo second = rotation.rotateKeys();
 
-        JwksDocument doc = publisher.getJwksDocument();
-        assertThat(doc.keys()).hasSize(2);
-        assertThat(doc.rawJson()).contains("\"keys\":[");
-        assertThat(publisher.getJwksJson()).isEqualTo(doc.rawJson());
+        Map<String, Object> parsed = JsonUtil.parseJson(publisher.getJwksJson());
+        assertThat(parsed).containsOnlyKeys("keys");
+        List<Map<String, Object>> keys = (List<Map<String, Object>>) parsed.get("keys");
+        assertThat(keys).hasSize(2);
+        assertThat(keys).extracting(k -> k.get("kid")).containsExactlyInAnyOrder(first.kid(), second.kid());
+        for (Map<String, Object> jwk : keys) {
+            assertThat(jwk).containsOnlyKeys("kty", "crv", "alg", "use", "kid", "x")
+                    .containsEntry("kty", "OKP")
+                    .containsEntry("crv", "Ed25519")
+                    .containsEntry("alg", "EdDSA")
+                    .containsEntry("use", "sig");
+            String x = (String) jwk.get("x");
+            assertThat(x).doesNotContain("=").doesNotContain("+").doesNotContain("/");
+            assertThat(Base64.getUrlDecoder().decode(x)).hasSize(32);
+        }
+        assertThat(publisher.getJwksDocument().rawJson()).isEqualTo(publisher.getJwksJson());
     }
 
     @Test
@@ -52,7 +69,7 @@ class DefaultJwksPublisherTest {
         rotation.rotateKeys();
 
         List<ApiSurfaceRoute> registered = new ArrayList<>();
-        ApiSurfaceRegistry mockRegistry = new ApiSurfaceRegistry() {
+        ApiSurfaceRegistry registry = new ApiSurfaceRegistry() {
             @Override
             public void registerRoute(ApiSurfaceRoute route) {
                 registered.add(route);
@@ -88,7 +105,7 @@ class DefaultJwksPublisherTest {
             }
         };
 
-        publisher.registerBoundaryRoute(mockRegistry);
+        publisher.registerBoundaryRoute(registry);
 
         assertThat(registered).hasSize(1);
         ApiSurfaceRoute route = registered.get(0);

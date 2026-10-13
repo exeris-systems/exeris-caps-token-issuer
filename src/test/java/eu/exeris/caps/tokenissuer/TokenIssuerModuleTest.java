@@ -5,6 +5,12 @@ import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRoute;
 import eu.exeris.caps.serviceboundarycore.api.RouteMatch;
 import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
+import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
+import eu.exeris.caps.tokenissuer.api.exception.TokenIssuerConfigurationException;
+import eu.exeris.caps.tokenissuer.testing.TestSupport;
+import eu.exeris.kernel.spi.persistence.PersistenceConnection;
+import eu.exeris.kernel.spi.persistence.TransactionIsolation;
+import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
 import eu.exeris.kernel.spi.http.HttpExchange;
 import eu.exeris.kernel.spi.http.HttpMethod;
 import org.junit.jupiter.api.DisplayName;
@@ -12,13 +18,55 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TokenIssuerModuleTest {
+
+    private static final Map<String, String> ENV = Map.of(
+            TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+            TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE);
+
+    /** Present only so the module selects persistent storage; construction must fail before any use. */
+    private static final TransactionalExecutor UNUSED_TX = new TransactionalExecutor() {
+        @Override public void execute(TransactionalWork work) { throw new AssertionError("not reached"); }
+        @Override public void executeManaged(TransactionalWork work) { throw new AssertionError("not reached"); }
+        @Override public void executeManaged(TransactionIsolation isolation, boolean readOnly, TransactionalWork work) {
+            throw new AssertionError("not reached");
+        }
+        @Override public <T> T query(Function<PersistenceConnection, T> query) { throw new AssertionError("not reached"); }
+    };
+
+    @Test
+    @DisplayName("persistent storage without a key-encryption keyring fails construction, typed and closed")
+    void missingKekFailsBoot() {
+        assertThatThrownBy(() -> new TokenIssuerModule(ENV, UNUSED_TX, null, null, null))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
+                        .isEqualTo("EXERIS_TOKEN_ISSUER_KEKS"));
+
+        Map<String, String> malformed = new HashMap<>(ENV);
+        malformed.put("EXERIS_TOKEN_ISSUER_KEKS", "k1:c2hvcnQ=");
+        assertThatThrownBy(() -> new TokenIssuerModule(malformed, UNUSED_TX, null, null, null))
+                .isInstanceOf(TokenIssuerConfigurationException.class);
+    }
+
+    @Test
+    @DisplayName("a missing issuer or audience fails construction for in-memory storage too")
+    void missingIssuerFailsBoot() {
+        assertThatThrownBy(() -> new TokenIssuerModule(Map.of(TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE),
+                null, null, null, null))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
+                        .isEqualTo(TokenIssuerConfig.ENV_ISSUER));
+    }
 
     @Test
     @DisplayName("Lifecycle management and service exposure")
@@ -59,7 +107,7 @@ class TokenIssuerModuleTest {
             public void handle(HttpExchange exchange) {}
         };
 
-        TokenIssuerModule module = new TokenIssuerModule(null, null, mockRegistry, null);
+        TokenIssuerModule module = new TokenIssuerModule(ENV, null, null, mockRegistry, null);
 
         assertThat(module.isInitialized()).isFalse();
         assertThat(module.isReady()).isFalse();

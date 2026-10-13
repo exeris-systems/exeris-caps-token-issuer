@@ -3,7 +3,7 @@
   "stamp" : {
     "validated" : true,
     "compositionVersion" : "0.0.0",
-    "contentBinding" : "sha256:0d988b25bae627d00ba2afb00538cf59909cb218a5d78bfbf097ef6ba38c8939"
+    "contentBinding" : "sha256:4f00d697de075d2073c20275fd1f7e6191f8c74a0cd4bb8c79b2d5ad17783dee"
   },
   "modules" : [
     {
@@ -14,15 +14,15 @@
         "provides" : [
           {
             "service" : "eu.exeris.caps.tokenissuer.api.AccessTokenIssuer",
-            "version" : "1.0.0"
+            "version" : "2.0.0"
           },
           {
             "service" : "eu.exeris.caps.tokenissuer.api.JwksPublisher",
-            "version" : "1.0.0"
+            "version" : "1.1.0"
           },
           {
             "service" : "eu.exeris.caps.tokenissuer.api.SigningKeyRotation",
-            "version" : "1.0.0"
+            "version" : "1.1.0"
           }
         ],
         "requires" : [

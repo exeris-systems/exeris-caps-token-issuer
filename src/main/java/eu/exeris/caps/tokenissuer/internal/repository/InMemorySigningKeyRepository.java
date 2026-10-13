@@ -2,7 +2,6 @@ package eu.exeris.caps.tokenissuer.internal.repository;
 
 import eu.exeris.caps.tokenissuer.api.KeyState;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -43,22 +42,11 @@ public final class InMemorySigningKeyRepository implements SigningKeyRepository 
     }
 
     @Override
-    public synchronized List<SigningKeyRecord> findPublishable(Instant now, Duration overlapWindow) {
+    public synchronized List<SigningKeyRecord> findPublishable(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
-        Objects.requireNonNull(overlapWindow, "overlapWindow must not be null");
         return keys.values().stream()
-                .filter(k -> {
-                    if (k.state() == KeyState.ACTIVE) {
-                        return true;
-                    }
-                    if (k.state() == KeyState.RETIRING) {
-                        Instant effectiveRetireAt = k.retiredAt() != null
-                                ? k.retiredAt()
-                                : k.expiresAt().plus(overlapWindow);
-                        return now.isBefore(effectiveRetireAt);
-                    }
-                    return false;
-                })
+                .filter(k -> k.state() == KeyState.ACTIVE
+                        || (k.state() == KeyState.RETIRING && k.retiredAt() != null && now.isBefore(k.retiredAt())))
                 .sorted(Comparator.comparing(SigningKeyRecord::createdAt).reversed())
                 .toList();
     }
