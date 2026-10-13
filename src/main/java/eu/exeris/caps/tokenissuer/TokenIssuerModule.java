@@ -50,13 +50,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @CapabilityModule
 @CapabilityLifecycle
-@Provides(service = AccessTokenIssuer.class, version = "2.0.0")
-@Provides(service = JwksPublisher.class, version = "1.1.0")
-@Provides(service = SigningKeyRotation.class, version = "1.1.0")
+@Provides(service = AccessTokenIssuer.class, version = "0.1.0")
+@Provides(service = JwksPublisher.class, version = "0.1.0")
+@Provides(service = SigningKeyRotation.class, version = "0.1.0")
 @Requires(service = ApiSurfaceRegistry.class, optional = true)
 @Requires(service = TransactionalExecutor.class, optional = true)
 @Requires(service = JobScheduler.class, optional = true)
-@Requires(service = AuditLogSink.class, versionRange = "[1.0.0,2.0.0)", optional = true)
+@Requires(service = AuditLogSink.class, versionRange = "[0.1.0,0.2.0)", optional = true)
 public final class TokenIssuerModule implements CapabilityLifecycleHooks {
 
     private final AccessTokenIssuer accessTokenIssuer;
