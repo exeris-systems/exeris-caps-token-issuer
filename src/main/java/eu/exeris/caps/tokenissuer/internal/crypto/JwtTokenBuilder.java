@@ -1,30 +1,40 @@
 package eu.exeris.caps.tokenissuer.internal.crypto;
 
 import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
+import eu.exeris.caps.tokenissuer.api.TokenIssueRequest;
 
 import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
  * Builds and signs compact JWT access tokens using Ed25519 (EdDSA).
  *
  * <p>Produces tokens conforming to RFC 7519, RFC 7515, and RFC 8037 with zero third-party libraries.
+ * The header is always {@code {"alg":"EdDSA","typ":"JWT","kid":...}}. A token is signed only when
+ * {@code iss}, {@code sub}, {@code aud}, {@code iat}, {@code nbf}, {@code exp} and {@code jti} are
+ * all set; the builder supplies no value of its own, and a custom claim can never replace one set
+ * through a dedicated method.
  *
  * @since 0.1.0
  */
 public final class JwtTokenBuilder {
 
+    private static final List<String> REQUIRED_CLAIMS = List.of("iss", "sub", "aud", "iat", "nbf", "exp", "jti");
+
     private final String kid;
     private final PrivateKey privateKey;
     private final Map<String, Object> claims = new LinkedHashMap<>();
+    private final Map<String, Object> custom = new LinkedHashMap<>();
     private Instant expiresAt;
 
     private JwtTokenBuilder(String kid, PrivateKey privateKey) {
@@ -36,96 +46,98 @@ public final class JwtTokenBuilder {
         return new JwtTokenBuilder(kid, privateKey);
     }
 
-    public JwtTokenBuilder subject(UUID subjectId) {
-        if (subjectId != null) {
-            claims.put("sub", subjectId.toString());
-        }
-        return this;
-    }
-
-    public JwtTokenBuilder session(UUID sessionId) {
-        if (sessionId != null) {
-            claims.put("sid", sessionId.toString());
-        }
-        return this;
-    }
-
     public JwtTokenBuilder issuer(String issuer) {
-        if (issuer != null && !issuer.isBlank()) {
-            claims.put("iss", issuer);
-        }
-        return this;
+        return put("iss", requireText("issuer", issuer));
+    }
+
+    public JwtTokenBuilder subject(UUID subjectId) {
+        return put("sub", Objects.requireNonNull(subjectId, "subjectId must not be null").toString());
     }
 
     public JwtTokenBuilder audience(String audience) {
-        if (audience != null && !audience.isBlank()) {
-            claims.put("aud", audience);
-        }
-        return this;
+        return put("aud", requireText("audience", audience));
     }
 
     public JwtTokenBuilder issuedAt(Instant iat) {
-        if (iat != null) {
-            claims.put("iat", iat.getEpochSecond());
-        }
-        return this;
+        return put("iat", Objects.requireNonNull(iat, "iat must not be null").getEpochSecond());
+    }
+
+    public JwtTokenBuilder notBefore(Instant nbf) {
+        return put("nbf", Objects.requireNonNull(nbf, "nbf must not be null").getEpochSecond());
     }
 
     public JwtTokenBuilder expiresAt(Instant exp) {
-        if (exp != null) {
-            this.expiresAt = exp;
-            claims.put("exp", exp.getEpochSecond());
-        }
-        return this;
+        this.expiresAt = Objects.requireNonNull(exp, "exp must not be null");
+        return put("exp", exp.getEpochSecond());
     }
 
     public JwtTokenBuilder jwtId(String jti) {
-        if (jti != null && !jti.isBlank()) {
-            claims.put("jti", jti);
-        }
-        return this;
+        return put("jti", requireText("jti", jti));
+    }
+
+    public JwtTokenBuilder tenant(String tenantId) {
+        return tenantId != null ? put(TokenIssueRequest.TENANT_CLAIM, tenantId) : this;
+    }
+
+    public JwtTokenBuilder session(UUID sessionId) {
+        return sessionId != null ? put("sid", sessionId.toString()) : this;
     }
 
     public JwtTokenBuilder roles(Set<String> roles) {
         if (roles != null && !roles.isEmpty()) {
-            claims.put("roles", roles);
+            put("roles", new TreeSet<>(roles));
         }
         return this;
     }
 
-    public JwtTokenBuilder customClaims(Map<String, Object> custom) {
-        if (custom != null && !custom.isEmpty()) {
-            claims.putAll(custom);
+    /**
+     * Adds claims that are serialised after the issuer-set claims. A name that is reserved, or
+     * already set through a dedicated method, is rejected.
+     */
+    public JwtTokenBuilder customClaims(Map<String, Object> customClaims) {
+        if (customClaims != null) {
+            for (Map.Entry<String, Object> entry : customClaims.entrySet()) {
+                if (TokenIssueRequest.RESERVED_CLAIMS.contains(entry.getKey()) || claims.containsKey(entry.getKey())) {
+                    throw new IllegalArgumentException("custom claim '" + entry.getKey() + "' is reserved for the issuer");
+                }
+                custom.put(entry.getKey(), entry.getValue());
+            }
         }
         return this;
     }
 
     public IssuedAccessToken sign() {
-        if (expiresAt == null) {
-            throw new IllegalStateException("expiresAt must be specified before signing");
+        for (String required : REQUIRED_CLAIMS) {
+            if (!claims.containsKey(required)) {
+                throw new IllegalStateException("claim '" + required + "' must be set before signing");
+            }
         }
-        if (!claims.containsKey("jti")) {
-            claims.put("jti", UUID.randomUUID().toString());
-        }
-        if (!claims.containsKey("iat")) {
-            claims.put("iat", Instant.now().getEpochSecond());
-        }
+        Map<String, Object> payload = new LinkedHashMap<>(claims);
+        payload.putAll(custom);
 
-        // 1. Header
-        String headerJson = "{\"alg\":\"EdDSA\",\"typ\":\"JWT\",\"kid\":\"" + escapeJson(kid) + "\"}";
+        String headerJson = "{\"alg\":\"" + Ed25519Signer.JWT_ALGORITHM + "\",\"typ\":\"JWT\",\"kid\":\""
+                + escapeJson(kid) + "\"}";
         String b64Header = base64Url(headerJson.getBytes(StandardCharsets.UTF_8));
+        String b64Payload = base64Url(serializeClaimsJson(payload).getBytes(StandardCharsets.UTF_8));
 
-        // 2. Payload
-        String payloadJson = serializeClaimsJson(claims);
-        String b64Payload = base64Url(payloadJson.getBytes(StandardCharsets.UTF_8));
-
-        // 3. Signing input
         String signingInput = b64Header + "." + b64Payload;
         byte[] signatureBytes = Ed25519Signer.sign(signingInput.getBytes(StandardCharsets.US_ASCII), privateKey);
-        String b64Signature = base64Url(signatureBytes);
+        return new IssuedAccessToken(signingInput + "." + base64Url(signatureBytes), expiresAt, "Bearer");
+    }
 
-        String compactJwt = signingInput + "." + b64Signature;
-        return new IssuedAccessToken(compactJwt, expiresAt, "Bearer");
+    private JwtTokenBuilder put(String name, Object value) {
+        if (custom.containsKey(name)) {
+            throw new IllegalArgumentException("claim '" + name + "' was already supplied as a custom claim");
+        }
+        claims.put(name, value);
+        return this;
+    }
+
+    private static String requireText(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value;
     }
 
     private static String base64Url(byte[] bytes) {
@@ -176,13 +188,26 @@ public final class JwtTokenBuilder {
     }
 
     private static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\b", "\\b")
-                .replace("\f", "\\f")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20 || c == 0x2028 || c == 0x2029) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 }

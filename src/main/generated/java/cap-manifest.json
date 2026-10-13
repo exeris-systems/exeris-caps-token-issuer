@@ -3,7 +3,7 @@
   "stamp" : {
     "validated" : true,
     "compositionVersion" : "0.0.0",
-    "contentBinding" : "sha256:0d988b25bae627d00ba2afb00538cf59909cb218a5d78bfbf097ef6ba38c8939"
+    "contentBinding" : "sha256:d5f742271b8c2c20356d35cf79cf0ce317ae63765f05aadfb852c2163b5a9750"
   },
   "modules" : [
     {
@@ -14,15 +14,15 @@
         "provides" : [
           {
             "service" : "eu.exeris.caps.tokenissuer.api.AccessTokenIssuer",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           },
           {
             "service" : "eu.exeris.caps.tokenissuer.api.JwksPublisher",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           },
           {
             "service" : "eu.exeris.caps.tokenissuer.api.SigningKeyRotation",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           }
         ],
         "requires" : [
@@ -40,7 +40,7 @@
           },
           {
             "service" : "eu.exeris.caps.audittrail.api.AuditLogSink",
-            "versionRange" : "[1.0.0,2.0.0)",
+            "versionRange" : "[0.1.0,0.2.0)",
             "optional" : true
           }
         ],
@@ -52,7 +52,7 @@
     {
       "module" : "eu.exeris.caps.tokenissuer.TokenIssuerModule",
       "service" : "eu.exeris.caps.audittrail.api.AuditLogSink",
-      "versionRange" : "[1.0.0,2.0.0)",
+      "versionRange" : "[0.1.0,0.2.0)",
       "optional" : true,
       "satisfied" : false,
       "providers" : [ ]
@@ -86,7 +86,7 @@
     "eu.exeris.caps.tokenissuer.TokenIssuerModule"
   ],
   "warnings" : [
-    "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.caps.audittrail.api.AuditLogSink version [1.0.0,2.0.0) but no @CapabilityModule provides it (optional — skipped)",
+    "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.caps.audittrail.api.AuditLogSink version [0.1.0,0.2.0) but no @CapabilityModule provides it (optional — skipped)",
     "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry but no @CapabilityModule provides it (optional — skipped)",
     "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.kernel.spi.persistence.TransactionalExecutor but no @CapabilityModule provides it (optional — skipped)",
     "module eu.exeris.caps.tokenissuer.TokenIssuerModule @Requires service eu.exeris.kernel.spi.scheduling.JobScheduler but no @CapabilityModule provides it (optional — skipped)"

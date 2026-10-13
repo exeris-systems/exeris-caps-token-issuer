@@ -1,11 +1,12 @@
 package eu.exeris.caps.tokenissuer.internal.repository;
 
 import eu.exeris.caps.tokenissuer.api.KeyState;
+import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Storage contract for persisting and retrieving cryptographic signing keys.
@@ -37,15 +38,15 @@ public interface SigningKeyRepository {
     Optional<SigningKeyRecord> findByKid(String kid);
 
     /**
-     * Retrieves all publishable keys for JWKS distribution:
-     * - Keys in {@link KeyState#ACTIVE}
-     * - Keys in {@link KeyState#RETIRING} whose {@code retiredAt} (or {@code expiresAt + overlapWindow}) is after {@code now}.
+     * Retrieves the keys the JWKS publishes at {@code now}: the {@link KeyState#ACTIVE} key and every
+     * {@link KeyState#RETIRING} key whose {@code retiredAt} is after {@code now}. A retiring key's
+     * {@code retiredAt} is set when it stops signing, so publication ends on time whether or not
+     * {@code retireExpiredKeys} has run.
      *
-     * @param now           reference current instant
-     * @param overlapWindow overlap grace window
-     * @return list of publishable key records
+     * @param now reference instant
+     * @return publishable key records, newest first
      */
-    List<SigningKeyRecord> findPublishable(Instant now, Duration overlapWindow);
+    List<SigningKeyRecord> findPublishable(Instant now);
 
     /**
      * Retrieves all recorded signing key records ordered by creation date descending.
@@ -77,9 +78,7 @@ public interface SigningKeyRepository {
      * @param rotationLogic rotation logic callback
      * @return rotated or active key info
      */
-    default eu.exeris.caps.tokenissuer.api.SigningKeyInfo rotateUnderClusterLock(
-            java.util.function.Supplier<eu.exeris.caps.tokenissuer.api.SigningKeyInfo> rotationLogic
-    ) {
+    default SigningKeyInfo rotateUnderClusterLock(Supplier<SigningKeyInfo> rotationLogic) {
         return rotationLogic.get();
     }
 }
