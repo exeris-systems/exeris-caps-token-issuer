@@ -47,7 +47,8 @@ class JwksHttpRouteTest {
     @Test
     @DisplayName("a max-age that is not a whole number of seconds of at least one is refused")
     void maxAgeMustBeWholeSeconds() {
-        assertThatThrownBy(() -> new JwksHttpRoute(() -> "{}", Duration.ofMillis(1500)))
+        Duration fractional = Duration.ofMillis(1500);
+        assertThatThrownBy(() -> new JwksHttpRoute(() -> "{}", fractional))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new JwksHttpRoute(() -> "{}", Duration.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);

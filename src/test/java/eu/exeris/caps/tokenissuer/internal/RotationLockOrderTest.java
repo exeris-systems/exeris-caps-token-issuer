@@ -39,6 +39,7 @@ class RotationLockOrderTest {
         private final CountDownLatch firstIsAboutToLock = new CountDownLatch(1);
         private final CountDownLatch secondOwnsLock = new CountDownLatch(1);
         private volatile boolean armed;
+        private final CountDownLatch firstRegistered = new CountDownLatch(1);
         private volatile Thread first;
 
         @Override
@@ -67,7 +68,7 @@ class RotationLockOrderTest {
             }
         }
 
-        @Override public void save(SigningKeyRecord record) { delegate.save(record); }
+        @Override public void save(SigningKeyRecord keyRecord) { delegate.save(keyRecord); }
         @Override public Optional<SigningKeyRecord> findActive() { return delegate.findActive(); }
         @Override public Optional<SigningKeyRecord> findByKid(String kid) { return delegate.findByKid(kid); }
         @Override public List<PublicSigningKey> findPublishablePublicKeys(Instant now) { return delegate.findPublishablePublicKeys(now); }
@@ -96,11 +97,10 @@ class RotationLockOrderTest {
             repository.armed = true;
             Future<SigningKeyInfo> first = executor.submit(() -> {
                 repository.first = Thread.currentThread();
+                repository.firstRegistered.countDown();
                 return rotation.ensureActiveKey();
             });
-            while (repository.first == null) {
-                Thread.sleep(2);
-            }
+            assertThat(repository.firstRegistered.await(10, TimeUnit.SECONDS)).isTrue();
             Future<SigningKeyInfo> second = executor.submit(rotation::rotateIfDue);
 
             SigningKeyInfo a = first.get(10, TimeUnit.SECONDS);

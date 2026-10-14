@@ -60,7 +60,9 @@ class TokenIssuerModuleTest {
         }
 
         @Override public JobHandle handle(String jobName) { return null; }
-        @Override public void close() { }
+        @Override public void close() {
+            // Nothing is held open: the scheduler only records what is submitted.
+        }
     }
 
     /** Present only so the module selects persistent storage; construction must fail before any use. */
@@ -76,22 +78,23 @@ class TokenIssuerModuleTest {
     @Test
     @DisplayName("persistent storage without a key-encryption keyring fails construction, typed and closed")
     void missingKekFailsBoot() {
-        assertThatThrownBy(() -> new TokenIssuerModule(ENV, UNUSED_TX, new RecordingScheduler(), null, null))
+        RecordingScheduler scheduler = new RecordingScheduler();
+        assertThatThrownBy(() -> new TokenIssuerModule(ENV, UNUSED_TX, scheduler, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo("EXERIS_TOKEN_ISSUER_KEKS"));
 
         Map<String, String> malformed = new HashMap<>(ENV);
         malformed.put("EXERIS_TOKEN_ISSUER_KEKS", "k1:c2hvcnQ=");
-        assertThatThrownBy(() -> new TokenIssuerModule(malformed, UNUSED_TX, new RecordingScheduler(), null, null))
+        assertThatThrownBy(() -> new TokenIssuerModule(malformed, UNUSED_TX, scheduler, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class);
     }
 
     @Test
     @DisplayName("a missing issuer or audience fails construction for in-memory storage too")
     void missingIssuerFailsBoot() {
-        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(
-                Map.of(TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE), null, null, null))
+        Map<String, String> withoutIssuer = Map.of(TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE);
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(withoutIssuer, null, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo(TokenIssuerConfig.ENV_ISSUER));

@@ -55,8 +55,9 @@ class TokenIssueRequestTest {
     @ValueSource(strings = {"PT1.5S", "PT0.5S", "PT0.999999999S", "PT0S", "PT-1S"})
     @DisplayName("a ttl that is not a whole number of seconds of at least one is refused")
     void ttlMustBeWholeSeconds(String ttl) {
+        Duration parsed = Duration.parse(ttl);
         assertThatThrownBy(() -> TokenIssueRequest.builder().subjectId(UUID.randomUUID())
-                .ttl(Duration.parse(ttl)).build())
+                .ttl(parsed).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("whole number of seconds");
     }

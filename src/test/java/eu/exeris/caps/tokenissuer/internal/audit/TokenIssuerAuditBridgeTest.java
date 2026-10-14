@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class TokenIssuerAuditBridgeTest {
 
@@ -50,6 +51,6 @@ class TokenIssuerAuditBridgeTest {
                 (action, type, id, actor, details, at) -> {
                     throw new IllegalStateException("sink down");
                 }, new MutableClock(Instant.parse("2026-01-01T00:00:00Z")));
-        bridge.logKeyGenerated("k-1");
+        assertThatCode(() -> bridge.logKeyGenerated("k-1")).doesNotThrowAnyException();
     }
 }

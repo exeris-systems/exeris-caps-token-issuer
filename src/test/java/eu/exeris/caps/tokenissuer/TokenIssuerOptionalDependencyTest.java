@@ -75,7 +75,8 @@ class TokenIssuerOptionalDependencyTest {
                 .isInstanceOf(ClassNotFoundException.class);
         assertThatThrownBy(() -> probe.loadClass("eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry"))
                 .isInstanceOf(ClassNotFoundException.class);
-        assertThatThrownBy(() -> probe.loadClass(ADAPTERS[0]).getConstructors())
+        String adapter = ADAPTERS[0];
+        assertThatThrownBy(() -> probe.loadClass(adapter).getConstructors())
                 .isInstanceOf(NoClassDefFoundError.class);
     }
 
