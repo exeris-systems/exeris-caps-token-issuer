@@ -40,8 +40,8 @@ public interface SigningKeyRepository {
     /**
      * Retrieves the public keys the JWKS publishes at {@code now}: every {@link KeyState#PENDING} and
      * {@link KeyState#ACTIVE} key and every {@link KeyState#RETIRING} key whose {@code retiredAt} is
-     * after {@code now}. A retiring key's {@code retiredAt} is set when it stops signing, so
-     * publication ends on time whether or not {@code retireExpiredKeys} has run. Private key material
+     * after {@code now}. A retiring key's {@code retiredAt} is the end of its publication window,
+     * so publication ends on time whether or not {@code retireExpiredKeys} has run. Private key material
      * is neither read nor unsealed.
      *
      * @param now reference instant
