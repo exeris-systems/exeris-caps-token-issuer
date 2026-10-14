@@ -105,7 +105,7 @@ class DefaultJwksPublisherTest {
             }
         };
 
-        publisher.registerBoundaryRoute(registry);
+        new eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar(registry).registerJwksRoute(publisher::getJwksJson);
 
         assertThat(registered).hasSize(1);
         ApiSurfaceRoute route = registered.get(0);

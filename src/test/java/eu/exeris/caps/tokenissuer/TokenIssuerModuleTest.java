@@ -7,6 +7,7 @@ import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
 import eu.exeris.caps.tokenissuer.api.exception.TokenIssuerConfigurationException;
+import eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar;
 import eu.exeris.caps.tokenissuer.testing.TestSupport;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.TransactionIsolation;
@@ -107,7 +108,7 @@ class TokenIssuerModuleTest {
             public void handle(HttpExchange exchange) {}
         };
 
-        TokenIssuerModule module = new TokenIssuerModule(ENV, null, null, mockRegistry, null);
+        TokenIssuerModule module = new TokenIssuerModule(ENV, null, null, new ApiSurfaceRegistryRegistrar(mockRegistry), null);
 
         assertThat(module.isInitialized()).isFalse();
         assertThat(module.isReady()).isFalse();

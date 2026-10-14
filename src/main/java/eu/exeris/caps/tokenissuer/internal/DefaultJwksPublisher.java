@@ -1,9 +1,7 @@
 package eu.exeris.caps.tokenissuer.internal;
 
-import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.tokenissuer.api.JwksDocument;
 import eu.exeris.caps.tokenissuer.api.JwksPublisher;
-import eu.exeris.caps.tokenissuer.internal.boundary.JwksHttpRoute;
 import eu.exeris.caps.tokenissuer.internal.crypto.Rfc8037JwksBuilder;
 import eu.exeris.caps.tokenissuer.internal.repository.SigningKeyRecord;
 import eu.exeris.caps.tokenissuer.internal.repository.SigningKeyRepository;
@@ -46,11 +44,5 @@ public final class DefaultJwksPublisher implements JwksPublisher {
             keyList.add(jwk);
         }
         return Rfc8037JwksBuilder.buildJwksDocument(keyList);
-    }
-
-    @Override
-    public void registerBoundaryRoute(ApiSurfaceRegistry registry) {
-        Objects.requireNonNull(registry, "ApiSurfaceRegistry must not be null");
-        registry.registerRoute(JwksHttpRoute.createRoute(this::getJwksJson));
     }
 }

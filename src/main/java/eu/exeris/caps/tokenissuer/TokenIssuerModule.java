@@ -15,6 +15,8 @@ import eu.exeris.caps.tokenissuer.internal.custody.KeyEncryptionKeyring;
 import eu.exeris.caps.tokenissuer.internal.repository.InMemorySigningKeyRepository;
 import eu.exeris.caps.tokenissuer.internal.repository.PostgresSigningKeyRepository;
 import eu.exeris.caps.tokenissuer.internal.repository.SigningKeyRepository;
+import eu.exeris.caps.tokenissuer.spi.AuditRecorder;
+import eu.exeris.caps.tokenissuer.spi.JwksRouteRegistrar;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
 import eu.exeris.kernel.spi.scheduling.JobScheduler;
 import eu.exeris.sdk.annotation.capability.CapabilityLifecycle;
@@ -46,6 +48,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * a missing or malformed keyring fails construction the same way. Without one the keys live in
  * process memory only and are never written anywhere.
  *
+ * <p>No constructor or method signature of this class names a type of an optional capability: the
+ * audit-trail sink and the service-boundary registry are adapted by
+ * {@link eu.exeris.caps.tokenissuer.spi.AuditLogSinkRecorder} and
+ * {@link eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar}, which a composition constructs
+ * only when it carries those jars. The {@code @Requires} edges below remain the capability graph's
+ * view of them.
+ *
  * @since 0.1.0
  */
 @CapabilityModule
@@ -62,7 +71,7 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     private final AccessTokenIssuer accessTokenIssuer;
     private final JwksPublisher jwksPublisher;
     private final DefaultSigningKeyRotation signingKeyRotation;
-    private final ApiSurfaceRegistry apiSurfaceRegistry;
+    private final JwksRouteRegistrar jwksRouteRegistrar;
 
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final AtomicBoolean ready = new AtomicBoolean(false);
@@ -85,10 +94,10 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     public TokenIssuerModule(
             TransactionalExecutor tx,
             JobScheduler scheduler,
-            ApiSurfaceRegistry apiSurfaceRegistry,
-            AuditLogSink auditLogSink
+            JwksRouteRegistrar jwksRouteRegistrar,
+            AuditRecorder auditRecorder
     ) {
-        this(System.getenv(), tx, scheduler, apiSurfaceRegistry, auditLogSink);
+        this(System.getenv(), tx, scheduler, jwksRouteRegistrar, auditRecorder);
     }
 
     /**
@@ -101,17 +110,17 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
             Map<String, String> environment,
             TransactionalExecutor tx,
             JobScheduler scheduler,
-            ApiSurfaceRegistry apiSurfaceRegistry,
-            AuditLogSink auditLogSink
+            JwksRouteRegistrar jwksRouteRegistrar,
+            AuditRecorder auditRecorder
     ) {
         this(
                 TokenIssuerConfig.fromEnvironment(Objects.requireNonNull(environment, "environment must not be null")),
                 tx != null
                         ? new PostgresSigningKeyRepository(tx, KeyEncryptionKeyring.fromEnvironment(environment))
                         : new InMemorySigningKeyRepository(),
-                apiSurfaceRegistry,
+                jwksRouteRegistrar,
                 scheduler,
-                auditLogSink != null ? new TokenIssuerAuditBridge(auditLogSink) : null,
+                auditRecorder != null ? new TokenIssuerAuditBridge(auditRecorder, Clock.systemUTC()) : null,
                 Clock.systemUTC()
         );
     }
@@ -119,7 +128,7 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     TokenIssuerModule(
             TokenIssuerConfig config,
             SigningKeyRepository repository,
-            ApiSurfaceRegistry apiSurfaceRegistry,
+            JwksRouteRegistrar jwksRouteRegistrar,
             JobScheduler jobScheduler,
             TokenIssuerAuditBridge auditBridge,
             Clock clock
@@ -128,7 +137,7 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
         Objects.requireNonNull(repository, "repository must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
 
-        this.apiSurfaceRegistry = apiSurfaceRegistry;
+        this.jwksRouteRegistrar = jwksRouteRegistrar;
         this.signingKeyRotation = new DefaultSigningKeyRotation(repository, config, auditBridge, jobScheduler, clock);
         this.jwksPublisher = new DefaultJwksPublisher(repository, clock);
         this.accessTokenIssuer = new DefaultAccessTokenIssuer(repository, config, this.signingKeyRotation, auditBridge, clock);
@@ -156,9 +165,9 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
         // 1. Ensure an unexpired active signing key exists
         signingKeyRotation.ensureActiveKey();
 
-        // 2. Register HTTP route GET /.well-known/jwks.json if service-boundary-core is present
-        if (apiSurfaceRegistry != null) {
-            jwksPublisher.registerBoundaryRoute(apiSurfaceRegistry);
+        // 2. Register HTTP route GET /.well-known/jwks.json if a registrar is wired
+        if (jwksRouteRegistrar != null) {
+            jwksRouteRegistrar.registerJwksRoute(jwksPublisher::getJwksJson);
         }
 
         // 3. Start automated background key rotation if scheduler is present
