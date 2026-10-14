@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p>The database comes from {@code EXERIS_TEST_PG_URL}, {@code EXERIS_TEST_PG_USER} and
  * {@code EXERIS_TEST_PG_PASSWORD} when they are set; otherwise from a Testcontainers PostgreSQL
- * with a generated password. Without either, the class is skipped.
+ * with a generated password. Without either, the class is skipped locally and fails when {@code CI} is set.
  */
 class PostgresSigningKeyRepositoryIT {
 
@@ -64,8 +64,14 @@ class PostgresSigningKeyRepositoryIT {
         if (url != null && !url.isBlank()) {
             tx = new JdbcTransactionalExecutor(url, System.getenv("EXERIS_TEST_PG_USER"), System.getenv("EXERIS_TEST_PG_PASSWORD"));
         } else {
-            Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
-                    "no EXERIS_TEST_PG_URL and no Docker; skipping PostgreSQL integration test");
+            // CI sets CI=true, and there a missing Docker daemon must fail the build, not skip the test.
+            if (System.getenv("CI") != null) {
+                assertThat(DockerClientFactory.instance().isDockerAvailable())
+                        .as("CI needs a Docker daemon for the PostgreSQL integration test").isTrue();
+            } else {
+                Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                        "no EXERIS_TEST_PG_URL and no Docker; skipping PostgreSQL integration test");
+            }
             container = new PostgreSQLContainer<>("postgres:17-alpine")
                     .withPassword(UUID.randomUUID().toString());
             container.start();
