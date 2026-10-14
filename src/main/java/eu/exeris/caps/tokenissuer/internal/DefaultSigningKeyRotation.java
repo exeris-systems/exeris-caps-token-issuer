@@ -34,6 +34,13 @@ import java.util.UUID;
  * it signed cannot be accepted by any verifier after that instant, so the key stays in the JWKS
  * exactly until then. Every instant comes from the injected {@link Clock}.
  *
+ * <p><b>Lock order.</b> Two locks exist and they are always taken in this order: first the
+ * repository's cluster lock ({@link SigningKeyRepository#rotateUnderClusterLock}), then the
+ * {@code rotationMonitor} inside it. No public method is {@code synchronized}, and nothing calls the
+ * cluster lock while holding the monitor, so a thread that waits for the cluster lock never owns the
+ * monitor another thread needs. {@code scheduleLock} guards only the job handle and is a leaf: no
+ * other lock is requested while it is held.
+ *
  * @since 0.1.0
  */
 public final class DefaultSigningKeyRotation implements SigningKeyRotation {
@@ -47,6 +54,8 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
     private final TokenIssuerAuditBridge auditBridge;
     private final JobScheduler jobScheduler;
     private final Clock clock;
+    private final Object rotationMonitor = new Object();
+    private final Object scheduleLock = new Object();
     private JobHandle rotationJobHandle;
 
     public DefaultSigningKeyRotation(
@@ -63,21 +72,25 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
-    public synchronized void startScheduledRotation() {
-        if (jobScheduler != null && rotationJobHandle == null) {
-            JobDescriptor descriptor = new JobDescriptor(
-                    ROTATION_JOB_NAME,
-                    new JobTrigger.FixedInterval(config.rotationCheckInterval(), config.rotationCheckInterval()),
-                    this::runScheduledCycle
-            );
-            this.rotationJobHandle = jobScheduler.submit(descriptor);
+    public void startScheduledRotation() {
+        synchronized (scheduleLock) {
+            if (jobScheduler != null && rotationJobHandle == null) {
+                JobDescriptor descriptor = new JobDescriptor(
+                        ROTATION_JOB_NAME,
+                        new JobTrigger.FixedInterval(config.rotationCheckInterval(), config.rotationCheckInterval()),
+                        this::runScheduledCycle
+                );
+                this.rotationJobHandle = jobScheduler.submit(descriptor);
+            }
         }
     }
 
-    public synchronized void stopScheduledRotation() {
-        if (rotationJobHandle != null) {
-            rotationJobHandle.cancel();
-            rotationJobHandle = null;
+    public void stopScheduledRotation() {
+        synchronized (scheduleLock) {
+            if (rotationJobHandle != null) {
+                rotationJobHandle.cancel();
+                rotationJobHandle = null;
+            }
         }
     }
 
@@ -103,7 +116,7 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         repository.deleteRetiredBefore(clock.instant());
     }
 
-    public synchronized SigningKeyInfo ensureActiveKey() {
+    public SigningKeyInfo ensureActiveKey() {
         return rotateIfDue();
     }
 
@@ -122,12 +135,13 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
     }
 
     /**
-     * Rotates under the repository's cluster lock. {@code observedActiveKid} is the active key the
+     * Rotates under the repository's cluster lock, then the in-process monitor (see the class
+     * comment for the lock order). {@code observedActiveKid} is the active key the
      * caller saw before taking the lock; if another node rotated in between, its key is kept.
      */
     private SigningKeyInfo rotate(String observedActiveKid, boolean onlyIfDue) {
         return repository.rotateUnderClusterLock(() -> {
-            synchronized (this) {
+            synchronized (rotationMonitor) {
                 try {
                     Instant now = clock.instant();
                     Optional<SigningKeyRecord> currentActive = repository.findActive();
@@ -190,7 +204,7 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
     }
 
     @Override
-    public synchronized int retireExpiredKeys() {
+    public int retireExpiredKeys() {
         Instant now = clock.instant();
         int retiredCount = 0;
         for (SigningKeyRecord rec : repository.findAll()) {
