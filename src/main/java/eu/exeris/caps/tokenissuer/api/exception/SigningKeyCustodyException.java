@@ -44,7 +44,9 @@ public class SigningKeyCustodyException extends TokenIssuerException {
     }
 
     /**
-     * @return the signing key id of the refused record
+     * Returns the signing key id of the refused record.
+     *
+     * @return the signing key id
      */
     public String kid() {
         return kid;

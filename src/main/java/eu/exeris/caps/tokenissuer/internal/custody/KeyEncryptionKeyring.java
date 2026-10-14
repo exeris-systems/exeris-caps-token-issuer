@@ -130,7 +130,9 @@ public final class KeyEncryptionKeyring {
     }
 
     /**
-     * @return the id of the KEK that seals new envelopes
+     * Returns the id of the KEK that seals new envelopes.
+     *
+     * @return the active KEK id
      */
     public String activeId() {
         return activeId;

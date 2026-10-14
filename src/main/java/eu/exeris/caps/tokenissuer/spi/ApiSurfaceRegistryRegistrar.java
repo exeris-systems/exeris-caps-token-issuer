@@ -21,6 +21,8 @@ public final class ApiSurfaceRegistryRegistrar implements JwksRouteRegistrar {
     private final ApiSurfaceRegistry registry;
 
     /**
+     * Creates an adapter that registers the JWKS route with the given registry.
+     *
      * @param registry the registry to register the route with; required
      */
     public ApiSurfaceRegistryRegistrar(ApiSurfaceRegistry registry) {

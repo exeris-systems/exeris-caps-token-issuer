@@ -27,6 +27,8 @@ public final class JwksHttpRoute implements HttpHandler {
     private final String cacheControl;
 
     /**
+     * Creates the route that serves the current JWKS document with a {@code Cache-Control} header.
+     *
      * @param jwksJsonSupplier supplies the current JWKS document
      * @param maxAge           the {@code max-age} served to verifiers; whole seconds, at least one. A
      *                         new key is published at least this long before it signs

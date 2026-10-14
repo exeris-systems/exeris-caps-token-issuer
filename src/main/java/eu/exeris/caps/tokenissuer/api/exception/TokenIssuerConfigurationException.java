@@ -26,7 +26,9 @@ public class TokenIssuerConfigurationException extends TokenIssuerException {
     }
 
     /**
-     * @return the configuration key that is missing or malformed
+     * Returns the configuration key that is missing or malformed.
+     *
+     * @return the configuration key
      */
     public String key() {
         return key;

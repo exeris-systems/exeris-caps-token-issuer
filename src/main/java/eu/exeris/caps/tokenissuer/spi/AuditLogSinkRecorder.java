@@ -20,6 +20,8 @@ public final class AuditLogSinkRecorder implements AuditRecorder {
     private final AuditLogSink sink;
 
     /**
+     * Creates an adapter that forwards each recorded event to the given audit-trail sink.
+     *
      * @param sink the audit-trail sink to forward to; required
      */
     public AuditLogSinkRecorder(AuditLogSink sink) {

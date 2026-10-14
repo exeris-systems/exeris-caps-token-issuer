@@ -67,8 +67,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * audit-trail sink and the service-boundary registry are adapted by
  * {@link eu.exeris.caps.tokenissuer.spi.AuditLogSinkRecorder} and
  * {@link eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar}, which a composition constructs
- * only when it carries those jars. The {@code @Requires} edges below remain the capability graph's
- * view of them.
+ * only when it carries those jars. The {@code @Requires} edges of those two are optional.
+ *
+ * <p>Every {@code @Requires} edge is declared {@code optional = true}, and the wired constructor is the
+ * authority on what boot needs. The capability graph cannot hold a kernel SPI as a mandatory edge,
+ * because no {@code @CapabilityModule} provides it, so the {@link TransactionalExecutor} edge is
+ * optional in the graph although the constructor refuses to build without one. The {@link JobScheduler}
+ * edge is optional in fact: {@code EXERIS_TOKEN_ISSUER_MANUAL_ROTATION=true} lets a deployment run
+ * rotation itself, and the constructor then accepts a {@code null} scheduler.
  *
  * @since 0.1.0
  */
