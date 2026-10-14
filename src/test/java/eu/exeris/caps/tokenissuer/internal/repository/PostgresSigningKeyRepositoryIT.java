@@ -120,6 +120,7 @@ class PostgresSigningKeyRepositoryIT {
         Map<String, String> env = Map.of(
                 TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
                 TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
                 KeyEncryptionKeyring.ENV_KEKS, "kek-it:" + TestSupport.newKek());
         TokenIssuerModule module = new TokenIssuerModule(env, tx, null, null, null);
         module.initialize();
@@ -172,6 +173,7 @@ class PostgresSigningKeyRepositoryIT {
         Map<String, String> env = Map.of(
                 TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
                 TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
                 KeyEncryptionKeyring.ENV_KEKS, "k1:" + TestSupport.newKek());
         TokenIssuerModule module = new TokenIssuerModule(env, tx, null, null, null);
         assertThatThrownBy(() -> module.accessTokenIssuer().issueAccessToken(UUID.randomUUID(), null))

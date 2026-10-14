@@ -6,6 +6,7 @@ import eu.exeris.caps.tokenissuer.api.AccessTokenIssuer;
 import eu.exeris.caps.tokenissuer.api.JwksPublisher;
 import eu.exeris.caps.tokenissuer.api.SigningKeyRotation;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
+import eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException;
 import eu.exeris.caps.tokenissuer.api.exception.TokenIssuerConfigurationException;
 import eu.exeris.caps.tokenissuer.internal.DefaultAccessTokenIssuer;
 import eu.exeris.caps.tokenissuer.internal.DefaultJwksPublisher;
@@ -37,16 +38,30 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Provides Layer 5 Domain Primitives:
  * <ul>
  *   <li>{@link AccessTokenIssuer} (short-lived JWT access tokens signed with EdDSA over Ed25519)</li>
- *   <li>{@link JwksPublisher} (JWKS document containing active and retiring public keys)</li>
+ *   <li>{@link JwksPublisher} (JWKS document containing pending, active and retiring public keys)</li>
  *   <li>{@link SigningKeyRotation} (key generations, publication window, retirement, and scheduler integration)</li>
  * </ul>
  *
- * <p>Construction reads {@link TokenIssuerConfig} from the environment and fails with a
- * {@link TokenIssuerConfigurationException} when the issuer or audience is missing. With a
- * {@link TransactionalExecutor} the signing keys are stored in PostgreSQL, sealed under the
- * key-encryption keyring of {@code EXERIS_TOKEN_ISSUER_KEKS} or {@code EXERIS_TOKEN_ISSUER_KEKS_FILE};
- * a missing or malformed keyring fails construction the same way. Without one the keys live in
- * process memory only and are never written anywhere.
+ * <p>The composition conductor instantiates this class through its no-arg constructor to run the
+ * lifecycle hooks, and that instance carries no services: its accessors throw
+ * {@link IllegalStateException}. The kernel SPIs this capability needs have no {@code ServiceLoader}
+ * lifecycle, so the composing SKU builds the wired instance with
+ * {@link #TokenIssuerModule(Map, TransactionalExecutor, JobScheduler, JwksRouteRegistrar, AuditRecorder)}.
+ *
+ * <p>The wired constructor fails at construction, and so the deployment fails to boot, when:
+ * <ul>
+ *   <li>the issuer or audience is missing, or another value is malformed
+ *       ({@link TokenIssuerConfigurationException});</li>
+ *   <li>the key-encryption keyring of {@code EXERIS_TOKEN_ISSUER_KEKS} or
+ *       {@code EXERIS_TOKEN_ISSUER_KEKS_FILE} is missing or malformed;</li>
+ *   <li>no {@link TransactionalExecutor} is supplied: signing keys are stored in PostgreSQL sealed
+ *       under the keyring, and there is no fallback to unsealed in-memory keys;</li>
+ *   <li>no {@link JobScheduler} is supplied while {@code EXERIS_TOKEN_ISSUER_MANUAL_ROTATION} is not
+ *       {@code true}: without the scheduler nothing publishes, promotes or retires keys, so a
+ *       deployment that runs those steps itself says so explicitly.</li>
+ * </ul>
+ * {@link #inMemoryForDevelopment(Map, JobScheduler, JwksRouteRegistrar, AuditRecorder)} is the one
+ * way to hold keys in process memory, unsealed, and its name says it is for development and tests.
  *
  * <p>No constructor or method signature of this class names a type of an optional capability: the
  * audit-trail sink and the service-boundary registry are adapted by
@@ -68,6 +83,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Requires(service = AuditLogSink.class, versionRange = "[0.1.0,0.2.0)", optional = true)
 public final class TokenIssuerModule implements CapabilityLifecycleHooks {
 
+    private static final System.Logger LOG = System.getLogger(TokenIssuerModule.class.getName());
+
     private final AccessTokenIssuer accessTokenIssuer;
     private final JwksPublisher jwksPublisher;
     private final DefaultSigningKeyRotation signingKeyRotation;
@@ -78,19 +95,22 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     private final AtomicBoolean ready = new AtomicBoolean(false);
 
     /**
-     * Public no-arg constructor for reflective instantiation by the composition conductor: in-memory
-     * keys, configuration from {@code System.getenv()}.
-     *
-     * @throws TokenIssuerConfigurationException when required configuration is missing or malformed
+     * Lifecycle-only instance for reflective instantiation by the composition conductor. It reads no
+     * configuration and holds no key; its service accessors throw {@link IllegalStateException}.
      */
     public TokenIssuerModule() {
-        this(System.getenv(), null, null, null, null);
+        this.accessTokenIssuer = null;
+        this.jwksPublisher = null;
+        this.signingKeyRotation = null;
+        this.jwksRouteRegistrar = null;
+        this.jwksMaxAge = null;
     }
 
     /**
-     * Wiring with kernel and capability SPIs, configuration from {@code System.getenv()}.
+     * Wired instance over PostgreSQL, configuration from {@code System.getenv()}.
      *
-     * @throws TokenIssuerConfigurationException when required configuration is missing or malformed
+     * @throws TokenIssuerConfigurationException when configuration, the keyring or the scheduler is
+     *                                           missing or malformed
      */
     public TokenIssuerModule(
             TransactionalExecutor tx,
@@ -102,10 +122,17 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     }
 
     /**
-     * Wiring with kernel and capability SPIs and an explicit configuration source.
+     * Wired instance over PostgreSQL with an explicit configuration source.
      *
-     * @param environment environment-style configuration; non-null
-     * @throws TokenIssuerConfigurationException when required configuration is missing or malformed
+     * @param environment        environment-style configuration; non-null
+     * @param tx                 kernel transactional executor; required
+     * @param scheduler          kernel job scheduler; required unless
+     *                           {@code EXERIS_TOKEN_ISSUER_MANUAL_ROTATION} is {@code true}
+     * @param jwksRouteRegistrar publishes {@code GET /.well-known/jwks.json}; {@code null} when the
+     *                           composition serves the JWKS itself
+     * @param auditRecorder      security audit receiver; {@code null} when the composition has none
+     * @throws TokenIssuerConfigurationException when configuration, the keyring or the scheduler is
+     *                                           missing or malformed
      */
     public TokenIssuerModule(
             Map<String, String> environment,
@@ -116,9 +143,34 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     ) {
         this(
                 TokenIssuerConfig.fromEnvironment(Objects.requireNonNull(environment, "environment must not be null")),
-                tx != null
-                        ? new PostgresSigningKeyRepository(tx, KeyEncryptionKeyring.fromEnvironment(environment))
-                        : new InMemorySigningKeyRepository(),
+                new PostgresSigningKeyRepository(
+                        Objects.requireNonNull(tx, "a TransactionalExecutor is required: signing keys are never held unsealed in memory"),
+                        KeyEncryptionKeyring.fromEnvironment(environment)),
+                jwksRouteRegistrar,
+                scheduler,
+                auditRecorder != null ? new TokenIssuerAuditBridge(auditRecorder, Clock.systemUTC()) : null,
+                Clock.systemUTC()
+        );
+    }
+
+    /**
+     * Instance that holds its signing keys unsealed in process memory, lost at restart. For
+     * development and tests only: it needs no database and no keyring, and offers none of the custody
+     * the wired constructor guarantees.
+     *
+     * @throws TokenIssuerConfigurationException when configuration or the scheduler is missing or malformed
+     */
+    public static TokenIssuerModule inMemoryForDevelopment(
+            Map<String, String> environment,
+            JobScheduler scheduler,
+            JwksRouteRegistrar jwksRouteRegistrar,
+            AuditRecorder auditRecorder
+    ) {
+        LOG.log(System.Logger.Level.WARNING,
+                "token issuer signing keys are held unsealed in process memory: development use only");
+        return new TokenIssuerModule(
+                TokenIssuerConfig.fromEnvironment(Objects.requireNonNull(environment, "environment must not be null")),
+                new InMemorySigningKeyRepository(),
                 jwksRouteRegistrar,
                 scheduler,
                 auditRecorder != null ? new TokenIssuerAuditBridge(auditRecorder, Clock.systemUTC()) : null,
@@ -137,24 +189,37 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
         Objects.requireNonNull(config, "config must not be null");
         Objects.requireNonNull(repository, "repository must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
+        if (jobScheduler == null && !config.manualRotation()) {
+            throw new TokenIssuerConfigurationException(TokenIssuerConfig.ENV_MANUAL_ROTATION,
+                    "a JobScheduler is required to publish, promote and retire signing keys; set this to true "
+                            + "only if the deployment calls rotateIfDue() and retireExpiredKeys() itself");
+        }
 
         this.jwksRouteRegistrar = jwksRouteRegistrar;
         this.jwksMaxAge = config.jwksMaxAge();
-        this.signingKeyRotation = new DefaultSigningKeyRotation(repository, config, auditBridge, jobScheduler, clock);
+        DefaultSigningKeyRotation rotation = new DefaultSigningKeyRotation(repository, config, auditBridge, jobScheduler, clock);
+        this.signingKeyRotation = rotation;
         this.jwksPublisher = new DefaultJwksPublisher(repository, clock);
-        this.accessTokenIssuer = new DefaultAccessTokenIssuer(repository, config, this.signingKeyRotation, auditBridge, clock);
+        this.accessTokenIssuer = new DefaultAccessTokenIssuer(repository, config, rotation, auditBridge, clock);
     }
 
     public AccessTokenIssuer accessTokenIssuer() {
-        return accessTokenIssuer;
+        return requireWired(accessTokenIssuer);
     }
 
     public JwksPublisher jwksPublisher() {
-        return jwksPublisher;
+        return requireWired(jwksPublisher);
     }
 
     public SigningKeyRotation signingKeyRotation() {
-        return signingKeyRotation;
+        return requireWired(signingKeyRotation);
+    }
+
+    private static <T> T requireWired(T service) {
+        if (service == null) {
+            throw new IllegalStateException("lifecycle-only instance: build the module with its wiring constructor to obtain services");
+        }
+        return service;
     }
 
     @Override
@@ -164,30 +229,41 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
 
     @Override
     public void ready() throws Exception {
-        // 1. Ensure an unexpired active signing key exists
-        signingKeyRotation.ensureActiveKey();
+        if (signingKeyRotation != null) {
+            // 1. Ensure an unexpired active signing key exists. After a long outage the successor may
+            // still be maturing; the pending key is already published and issuance fails closed.
+            try {
+                signingKeyRotation.ensureActiveKey();
+            } catch (NoActiveKeyException e) {
+                LOG.log(System.Logger.Level.WARNING, e.getMessage());
+            }
 
-        // 2. Register HTTP route GET /.well-known/jwks.json if a registrar is wired
-        if (jwksRouteRegistrar != null) {
-            jwksRouteRegistrar.registerJwksRoute(jwksPublisher::getJwksJson, jwksMaxAge);
+            // 2. Register HTTP route GET /.well-known/jwks.json if a registrar is wired
+            if (jwksRouteRegistrar != null) {
+                jwksRouteRegistrar.registerJwksRoute(jwksPublisher::getJwksJson, jwksMaxAge);
+            }
+
+            // 3. Start the background key lifecycle job if a scheduler is wired
+            signingKeyRotation.startScheduledRotation();
         }
-
-        // 3. Start automated background key rotation if scheduler is present
-        signingKeyRotation.startScheduledRotation();
         ready.set(true);
     }
 
     @Override
     public void drain(Duration remaining) throws Exception {
         ready.set(false);
-        signingKeyRotation.stopScheduledRotation();
+        if (signingKeyRotation != null) {
+            signingKeyRotation.stopScheduledRotation();
+        }
     }
 
     @Override
     public void terminate() {
         ready.set(false);
         initialized.set(false);
-        signingKeyRotation.stopScheduledRotation();
+        if (signingKeyRotation != null) {
+            signingKeyRotation.stopScheduledRotation();
+        }
     }
 
     public boolean isReady() {
