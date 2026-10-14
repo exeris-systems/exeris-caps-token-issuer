@@ -190,6 +190,29 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         SigningKeyInfo active = all.stream().filter(k -> k.state() == KeyState.ACTIVE).findFirst().orElse(null);
         List<SigningKeyInfo> pending = all.stream().filter(k -> k.state() == KeyState.PENDING).toList();
 
+        SigningKeyInfo ready = retireExpiredPendingAndFindReady(pending, now);
+        if (ready != null) {
+            retireSurplusPending(pending, ready, now);
+            return promote(ready, all, now);
+        }
+
+        List<SigningKeyInfo> waiting = pending.stream().filter(k -> now.isBefore(k.expiresAt())).toList();
+        if (active == null) {
+            return waiting.isEmpty()
+                    ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()))
+                    : waiting.get(0);
+        }
+        if (now.isBefore(active.expiresAt())) {
+            return advanceWhileActiveIsValid(active, waiting, forced, now);
+        }
+        return waiting.isEmpty() ? createPendingKey(now) : waiting.get(0);
+    }
+
+    /**
+     * Retires every pending key that expired before it could activate and returns the first remaining
+     * one whose activation instant has passed, or {@code null} when none is ready.
+     */
+    private SigningKeyInfo retireExpiredPendingAndFindReady(List<SigningKeyInfo> pending, Instant now) {
         SigningKeyInfo ready = null;
         for (SigningKeyInfo candidate : pending) {
             if (!now.isBefore(candidate.expiresAt())) {
@@ -198,39 +221,38 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
                 ready = candidate;
             }
         }
-        if (ready != null) {
-            for (SigningKeyInfo other : pending) {
-                if (!other.kid().equals(ready.kid()) && now.isBefore(other.expiresAt())) {
-                    repository.updateState(other.kid(), KeyState.RETIRED, now);
-                }
-            }
-            return promote(ready, all, now);
-        }
+        return ready;
+    }
 
-        List<SigningKeyInfo> waiting = pending.stream().filter(k -> now.isBefore(k.expiresAt())).toList();
+    /** Retires the unexpired pending keys other than the one being promoted. */
+    private void retireSurplusPending(List<SigningKeyInfo> pending, SigningKeyInfo ready, Instant now) {
+        for (SigningKeyInfo other : pending) {
+            if (!other.kid().equals(ready.kid()) && now.isBefore(other.expiresAt())) {
+                repository.updateState(other.kid(), KeyState.RETIRED, now);
+            }
+        }
+    }
 
-        if (active == null) {
-            if (waiting.isEmpty()) {
-                return createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()));
-            }
-            return waiting.get(0);
-        }
-        if (now.isBefore(active.expiresAt())) {
-            if (!waiting.isEmpty()) {
-                return forced ? waiting.get(0) : active;
-            }
-            if (forced) {
-                return createKey(KeyState.PENDING, now, now.plus(config.jwksMaxAge()).plus(config.keyTtl()));
-            }
-            if (!now.isBefore(active.expiresAt().minus(config.publicationLead()))) {
-                createKey(KeyState.PENDING, now,
-                        max(active.expiresAt(), now.plus(config.jwksMaxAge())).plus(config.keyTtl()));
-            }
-            return active;
-        }
+    /**
+     * The active key is still valid: it keeps signing, and its successor is generated once
+     * {@code publicationLead} remains before it expires, or at once when the rotation is forced.
+     */
+    private SigningKeyInfo advanceWhileActiveIsValid(SigningKeyInfo active, List<SigningKeyInfo> waiting,
+                                                     boolean forced, Instant now) {
         if (!waiting.isEmpty()) {
-            return waiting.get(0);
+            return forced ? waiting.get(0) : active;
         }
+        if (forced) {
+            return createPendingKey(now);
+        }
+        if (!now.isBefore(active.expiresAt().minus(config.publicationLead()))) {
+            createKey(KeyState.PENDING, now,
+                    max(active.expiresAt(), now.plus(config.jwksMaxAge())).plus(config.keyTtl()));
+        }
+        return active;
+    }
+
+    private SigningKeyInfo createPendingKey(Instant now) {
         return createKey(KeyState.PENDING, now, now.plus(config.jwksMaxAge()).plus(config.keyTtl()));
     }
 
@@ -263,13 +285,13 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         Map<String, String> jwkParams = Rfc8037JwksBuilder.buildJwkParams(kid, rawPub);
         String jwkJson = Rfc8037JwksBuilder.serializeJwk(jwkParams);
 
-        SigningKeyRecord record = new SigningKeyRecord(kid, Ed25519Signer.JWT_ALGORITHM, jwkJson, rawPub,
+        SigningKeyRecord keyRecord = new SigningKeyRecord(kid, Ed25519Signer.JWT_ALGORITHM, jwkJson, rawPub,
                 privPkcs8, state, createdAt, expiresAt, null);
-        repository.save(record);
+        repository.save(keyRecord);
         if (auditBridge != null) {
             auditBridge.logKeyGenerated(kid);
         }
-        return record.toInfo();
+        return keyRecord.toInfo();
     }
 
     private static Instant max(Instant a, Instant b) {
