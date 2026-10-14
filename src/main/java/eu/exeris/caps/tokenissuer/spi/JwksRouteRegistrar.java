@@ -1,5 +1,6 @@
 package eu.exeris.caps.tokenissuer.spi;
 
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -18,6 +19,8 @@ public interface JwksRouteRegistrar {
      * Registers the route.
      *
      * @param jwksJson supplies the current JWKS document; called once per request
+     * @param maxAge   the cache lifetime served to verifiers; the capability publishes a new key at
+     *                 least this long before it signs
      */
-    void registerJwksRoute(Supplier<String> jwksJson);
+    void registerJwksRoute(Supplier<String> jwksJson, Duration maxAge);
 }

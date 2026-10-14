@@ -3,6 +3,7 @@ package eu.exeris.caps.tokenissuer.spi;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.tokenissuer.internal.boundary.JwksHttpRoute;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -27,7 +28,7 @@ public final class ApiSurfaceRegistryRegistrar implements JwksRouteRegistrar {
     }
 
     @Override
-    public void registerJwksRoute(Supplier<String> jwksJson) {
-        registry.registerRoute(JwksHttpRoute.createRoute(jwksJson));
+    public void registerJwksRoute(Supplier<String> jwksJson, Duration maxAge) {
+        registry.registerRoute(JwksHttpRoute.createRoute(jwksJson, maxAge));
     }
 }

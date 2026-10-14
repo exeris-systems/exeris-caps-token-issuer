@@ -84,7 +84,7 @@ class StandardLibraryInteropTest {
         IssuedAccessToken beforeRotation = issuer.issueAccessToken(TokenIssueRequest.builder()
                 .subjectId(UUID.randomUUID()).ttl(config.maxTokenTtl()).build());
 
-        rotation.rotateKeys();
+        TestSupport.rotateAndActivate(rotation, clock, config);
         IssuedAccessToken afterRotation = issuer.issueAccessToken(UUID.randomUUID(), null);
 
         String jwksDuringOverlap = jwks.getJwksJson();

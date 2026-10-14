@@ -121,10 +121,14 @@ class DefaultAccessTokenIssuerTest {
     }
 
     @Test
-    @DisplayName("a key past its expiresAt never signs: issuance rotates first")
+    @DisplayName("a key past its expiresAt never signs: its successor is published first and signs once it has matured")
     void expiredKeyDoesNotSign() throws Exception {
         String firstKid = rotation.ensureActiveKey().kid();
         clock.advance(config.keyTtl().plusSeconds(1));
+
+        assertThatThrownBy(() -> issuer.issueAccessToken(UUID.randomUUID(), null))
+                .isInstanceOf(eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException.class);
+        clock.advance(config.jwksMaxAge());
 
         IssuedAccessToken token = issuer.issueAccessToken(UUID.randomUUID(), null);
         String kid = (String) decode(token.token().split("\\.")[0]).get("kid");

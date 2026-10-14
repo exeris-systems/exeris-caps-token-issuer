@@ -72,6 +72,7 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
     private final JwksPublisher jwksPublisher;
     private final DefaultSigningKeyRotation signingKeyRotation;
     private final JwksRouteRegistrar jwksRouteRegistrar;
+    private final Duration jwksMaxAge;
 
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final AtomicBoolean ready = new AtomicBoolean(false);
@@ -138,6 +139,7 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
         Objects.requireNonNull(clock, "clock must not be null");
 
         this.jwksRouteRegistrar = jwksRouteRegistrar;
+        this.jwksMaxAge = config.jwksMaxAge();
         this.signingKeyRotation = new DefaultSigningKeyRotation(repository, config, auditBridge, jobScheduler, clock);
         this.jwksPublisher = new DefaultJwksPublisher(repository, clock);
         this.accessTokenIssuer = new DefaultAccessTokenIssuer(repository, config, this.signingKeyRotation, auditBridge, clock);
@@ -167,7 +169,7 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
 
         // 2. Register HTTP route GET /.well-known/jwks.json if a registrar is wired
         if (jwksRouteRegistrar != null) {
-            jwksRouteRegistrar.registerJwksRoute(jwksPublisher::getJwksJson);
+            jwksRouteRegistrar.registerJwksRoute(jwksPublisher::getJwksJson, jwksMaxAge);
         }
 
         // 3. Start automated background key rotation if scheduler is present

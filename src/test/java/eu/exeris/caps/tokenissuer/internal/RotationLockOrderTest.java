@@ -3,6 +3,7 @@ package eu.exeris.caps.tokenissuer.internal;
 import eu.exeris.caps.tokenissuer.api.KeyState;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 import eu.exeris.caps.tokenissuer.internal.repository.InMemorySigningKeyRepository;
+import eu.exeris.caps.tokenissuer.internal.repository.PublicSigningKey;
 import eu.exeris.caps.tokenissuer.internal.repository.SigningKeyRecord;
 import eu.exeris.caps.tokenissuer.internal.repository.SigningKeyRepository;
 import eu.exeris.caps.tokenissuer.testing.TestSupport;
@@ -10,7 +11,6 @@ import eu.exeris.caps.tokenissuer.testing.TestSupport.MutableClock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -28,7 +28,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The cluster lock is always taken before the in-process monitor. The repository below models the
  * advisory lock with a real lock and forces the interleaving that deadlocks under the opposite order:
  * one thread is inside {@code ensureActiveKey} and about to ask for the cluster lock while another
- * already owns it.
+ * already owns it. Both find the active key inside its publication lead, so both have a successor to
+ * generate.
  */
 class RotationLockOrderTest {
 
@@ -69,8 +70,8 @@ class RotationLockOrderTest {
         @Override public void save(SigningKeyRecord record) { delegate.save(record); }
         @Override public Optional<SigningKeyRecord> findActive() { return delegate.findActive(); }
         @Override public Optional<SigningKeyRecord> findByKid(String kid) { return delegate.findByKid(kid); }
-        @Override public List<SigningKeyRecord> findPublishable(Instant now) { return delegate.findPublishable(now); }
-        @Override public List<SigningKeyRecord> findAll() { return delegate.findAll(); }
+        @Override public List<PublicSigningKey> findPublishablePublicKeys(Instant now) { return delegate.findPublishablePublicKeys(now); }
+        @Override public List<SigningKeyInfo> findAllInfo() { return delegate.findAllInfo(); }
         @Override public void updateState(String kid, KeyState state, Instant retiredAt) { delegate.updateState(kid, state, retiredAt); }
         @Override public int deleteRetiredBefore(Instant cutoff) { return delegate.deleteRetiredBefore(cutoff); }
     }
@@ -82,8 +83,9 @@ class RotationLockOrderTest {
         MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         DefaultSigningKeyRotation rotation =
                 new DefaultSigningKeyRotation(repository, TestSupport.config(), null, null, clock);
-        rotation.ensureActiveKey();
-        clock.advance(Duration.ofDays(30));
+        SigningKeyInfo initial = rotation.ensureActiveKey();
+        // Inside the publication lead both paths find a successor to generate and both want the lock.
+        clock.set(initial.expiresAt().minus(TestSupport.config().publicationLead()));
 
         ExecutorService executor = Executors.newFixedThreadPool(2, runnable -> {
             Thread thread = new Thread(runnable, "rotation-lock-order");
@@ -105,6 +107,7 @@ class RotationLockOrderTest {
             SigningKeyInfo b = second.get(10, TimeUnit.SECONDS);
             assertThat(a.state()).isEqualTo(KeyState.ACTIVE);
             assertThat(b.kid()).isEqualTo(a.kid());
+            assertThat(repository.findAllInfo()).filteredOn(k -> k.state() == KeyState.PENDING).hasSize(1);
         } finally {
             executor.shutdownNow();
         }

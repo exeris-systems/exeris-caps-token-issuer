@@ -9,7 +9,7 @@ import java.util.Objects;
  * or key-encryption keyring fails to boot instead of running on a substitute value. The message
  * names the configuration key and never contains the value that was supplied for it.
  *
- * @since 0.2.0
+ * @since 0.1.0
  */
 public class TokenIssuerConfigurationException extends TokenIssuerException {
 
