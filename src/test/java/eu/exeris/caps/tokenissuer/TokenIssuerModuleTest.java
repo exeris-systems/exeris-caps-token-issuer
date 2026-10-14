@@ -1,7 +1,9 @@
 package eu.exeris.caps.tokenissuer;
 
+import eu.exeris.caps.serviceboundarycore.api.AdmissionFilter;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRoute;
+import eu.exeris.caps.serviceboundarycore.api.RequestFilterChain;
 import eu.exeris.caps.serviceboundarycore.api.RouteMatch;
 import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
@@ -137,6 +139,54 @@ class TokenIssuerModuleTest {
 
             @Override
             public void handle(HttpExchange exchange) {}
+
+
+            @Override
+
+            public RequestFilterChain filterChain() {
+
+                return RequestFilterChain.empty();
+
+            }
+
+
+
+            @Override
+
+
+            public void registerFilter(AdmissionFilter filter) {
+
+
+                filterChain().registerFilter(filter);
+
+
+            }
+
+
+
+            @Override
+
+
+            public boolean unregisterFilter(AdmissionFilter filter) {
+
+
+                return false;
+
+
+            }
+
+
+
+            @Override
+
+
+            public List<AdmissionFilter> filters() {
+
+
+                return List.of();
+
+
+            }
         };
 
         TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(MANUAL_ENV, null, new ApiSurfaceRegistryRegistrar(mockRegistry), null);
