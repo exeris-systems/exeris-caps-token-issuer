@@ -37,8 +37,8 @@ The module reads its configuration from the environment when it is constructed. 
 | `EXERIS_TOKEN_ISSUER_ROTATION_CHECK_INTERVAL` | no | `PT1H` | how often the scheduled job runs |
 | `EXERIS_TOKEN_ISSUER_JWKS_MAX_AGE` | no | `PT5M` | `max-age` the JWKS route serves, and how long a new key is published before it signs; whole seconds |
 | `EXERIS_TOKEN_ISSUER_MANUAL_ROTATION` | no | `false` | `true` when no scheduler is wired and the deployment runs rotation and retirement itself |
-| `EXERIS_TOKEN_ISSUER_KEKS` | yes, or the file key | – | key-encryption keyring, `<id>:<base64>[,<id>:<base64>…]` |
-| `EXERIS_TOKEN_ISSUER_KEKS_FILE` | yes, or the inline key | – | path to a file holding the same keyring, such as a mounted secret |
+| `EXERIS_TOKEN_ISSUER_KEKS` | with the wired constructor, unless the file key is set | – | key-encryption keyring, `<id>:<base64>[,<id>:<base64>…]` |
+| `EXERIS_TOKEN_ISSUER_KEKS_FILE` | with the wired constructor, unless the inline key is set | – | path to a file holding the same keyring, such as a mounted secret |
 
 Durations are ISO-8601. Set exactly one of the two keyring keys. Each KEK must decode to 32 random bytes, for example from `openssl rand -base64 32`; a passphrase is refused, not hashed into a key. The first entry seals new keys, and the later entries only open existing ones. To rotate a KEK, prepend the new entry and call `PostgresSigningKeyRepository.resealWithActiveKek()`, then remove the old entry. A stored key that is not sealed, names an unknown KEK, or fails authentication throws `SigningKeyCustodyException`; nothing falls back to plaintext.
 
@@ -51,7 +51,7 @@ mvn compile -Dexeris.codegen.skip=true   # pass 1 — the processor writes capab
 mvn verify                               # pass 2 — generate cap-manifest.json, validate the graph, scan the Wall
 ```
 
-`PostgresSigningKeyRepositoryIT` runs against a real PostgreSQL. It uses `EXERIS_TEST_PG_URL`, `EXERIS_TEST_PG_USER` and `EXERIS_TEST_PG_PASSWORD` when they are set. Otherwise it starts a Testcontainers `postgres:17-alpine`, and it is skipped when Docker is not available.
+`PostgresSigningKeyRepositoryIT` runs against a real PostgreSQL. It uses `EXERIS_TEST_PG_URL`, `EXERIS_TEST_PG_USER` and `EXERIS_TEST_PG_PASSWORD` when they are set. Otherwise it starts a Testcontainers `postgres:17-alpine`. Without Docker it is skipped locally and fails when `CI` is set; in CI, `build.yml` also checks that the test report shows it ran with no test skipped.
 
 Both passes are needed after a `clean`: `exeris:generate` runs before `compile`, and `compile` is when the processor writes the metadata it reads. `src/main/generated/java/cap-manifest.json` is committed, so a clean `git status` after `mvn verify` shows the manifest matches the declaration.
 
