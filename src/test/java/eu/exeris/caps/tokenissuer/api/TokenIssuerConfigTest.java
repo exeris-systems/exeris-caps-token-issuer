@@ -68,4 +68,16 @@ class TokenIssuerConfigTest {
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .hasMessageContaining(TokenIssuerConfig.ENV_TOKEN_TTL);
     }
+
+    @Test
+    @DisplayName("configured lifetimes must be whole seconds")
+    void lifetimesAreWholeSeconds() {
+        for (String key : new String[]{TokenIssuerConfig.ENV_TOKEN_TTL, TokenIssuerConfig.ENV_MAX_TOKEN_TTL}) {
+            Map<String, String> env = env();
+            env.put(key, "PT0.5S");
+            assertThatThrownBy(() -> TokenIssuerConfig.fromEnvironment(env))
+                    .isInstanceOf(TokenIssuerConfigurationException.class)
+                    .hasMessageContaining(key);
+        }
+    }
 }

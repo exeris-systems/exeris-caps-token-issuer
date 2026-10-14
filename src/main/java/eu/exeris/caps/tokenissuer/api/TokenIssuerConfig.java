@@ -17,8 +17,8 @@ import java.util.Objects;
  *
  * @param issuer                the {@code iss} claim of every token; required
  * @param audience              the {@code aud} claim of every token; required
- * @param defaultTokenTtl       lifetime of a token whose request names none; positive, at most {@code maxTokenTtl}
- * @param maxTokenTtl           upper bound on any token lifetime; positive
+ * @param defaultTokenTtl       lifetime of a token whose request names none; whole seconds, at most {@code maxTokenTtl}
+ * @param maxTokenTtl           upper bound on any token lifetime; whole seconds, at least one
  * @param clockSkew             verifier clock tolerance the key publication window allows for; zero or positive
  * @param keyTtl                how long a signing key stays active before it is due for rotation; positive
  * @param rotationCheckInterval how often the scheduled job checks whether rotation or retirement is due; positive
@@ -53,8 +53,8 @@ public record TokenIssuerConfig(
     public TokenIssuerConfig {
         issuer = requireClaimValue(ENV_ISSUER, issuer);
         audience = requireClaimValue(ENV_AUDIENCE, audience);
-        requirePositive(ENV_TOKEN_TTL, defaultTokenTtl);
-        requirePositive(ENV_MAX_TOKEN_TTL, maxTokenTtl);
+        requireWholeSeconds(ENV_TOKEN_TTL, defaultTokenTtl);
+        requireWholeSeconds(ENV_MAX_TOKEN_TTL, maxTokenTtl);
         requirePositive(ENV_KEY_TTL, keyTtl);
         requirePositive(ENV_ROTATION_CHECK_INTERVAL, rotationCheckInterval);
         if (clockSkew == null || clockSkew.isNegative()) {
@@ -111,6 +111,12 @@ public record TokenIssuerConfig(
             return Duration.parse(raw.trim());
         } catch (DateTimeParseException e) {
             throw new TokenIssuerConfigurationException(key, "must be an ISO-8601 duration such as PT15M", e);
+        }
+    }
+
+    private static void requireWholeSeconds(String key, Duration value) {
+        if (value == null || !TokenIssueRequest.isWholeSeconds(value)) {
+            throw new TokenIssuerConfigurationException(key, "must be a whole number of seconds, at least 1");
         }
     }
 

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
@@ -48,5 +49,23 @@ class TokenIssueRequestTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatCode(() -> TokenIssueRequest.builder().subjectId(UUID.randomUUID()).tenantId(null).build())
                 .doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PT1.5S", "PT0.5S", "PT0.999999999S", "PT0S", "PT-1S"})
+    @DisplayName("a ttl that is not a whole number of seconds of at least one is refused")
+    void ttlMustBeWholeSeconds(String ttl) {
+        assertThatThrownBy(() -> TokenIssueRequest.builder().subjectId(UUID.randomUUID())
+                .ttl(Duration.parse(ttl)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("whole number of seconds");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PT1S", "PT15M", "PT1H"})
+    @DisplayName("a whole-second ttl is accepted")
+    void wholeSecondTtlAccepted(String ttl) {
+        assertThatCode(() -> TokenIssueRequest.builder().subjectId(UUID.randomUUID())
+                .ttl(Duration.parse(ttl)).build()).doesNotThrowAnyException();
     }
 }
