@@ -68,4 +68,48 @@ class TokenIssuerConfigTest {
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .hasMessageContaining(TokenIssuerConfig.ENV_TOKEN_TTL);
     }
+
+    @Test
+    @DisplayName("configured lifetimes must be whole seconds")
+    void lifetimesAreWholeSeconds() {
+        for (String key : new String[]{TokenIssuerConfig.ENV_TOKEN_TTL, TokenIssuerConfig.ENV_MAX_TOKEN_TTL}) {
+            Map<String, String> env = env();
+            env.put(key, "PT0.5S");
+            assertThatThrownBy(() -> TokenIssuerConfig.fromEnvironment(env))
+                    .isInstanceOf(TokenIssuerConfigurationException.class)
+                    .hasMessageContaining(key);
+        }
+    }
+
+    @Test
+    @DisplayName("the JWKS cache lifetime is whole seconds and shorter than the key lifetime less the rotation check")
+    void jwksMaxAgeAndKeyLifetime() {
+        assertThat(TokenIssuerConfig.fromEnvironment(env()).jwksMaxAge()).isEqualTo(Duration.ofMinutes(5));
+        assertThat(TokenIssuerConfig.fromEnvironment(env()).publicationLead()).isEqualTo(Duration.ofMinutes(65));
+
+        Map<String, String> fractional = env();
+        fractional.put(TokenIssuerConfig.ENV_JWKS_MAX_AGE, "PT0.5S");
+        assertThatThrownBy(() -> TokenIssuerConfig.fromEnvironment(fractional))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .hasMessageContaining(TokenIssuerConfig.ENV_JWKS_MAX_AGE);
+
+        Map<String, String> shortKey = env();
+        shortKey.put(TokenIssuerConfig.ENV_KEY_TTL, "PT1H");
+        assertThatThrownBy(() -> TokenIssuerConfig.fromEnvironment(shortKey))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .hasMessageContaining(TokenIssuerConfig.ENV_KEY_TTL);
+    }
+
+    @Test
+    @DisplayName("manual rotation is an explicit true/false switch, off by default")
+    void manualRotationSwitch() {
+        assertThat(TokenIssuerConfig.fromEnvironment(env()).manualRotation()).isFalse();
+        Map<String, String> on = env();
+        on.put(TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
+        assertThat(TokenIssuerConfig.fromEnvironment(on).manualRotation()).isTrue();
+        on.put(TokenIssuerConfig.ENV_MANUAL_ROTATION, "yes");
+        assertThatThrownBy(() -> TokenIssuerConfig.fromEnvironment(on))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .hasMessageContaining(TokenIssuerConfig.ENV_MANUAL_ROTATION);
+    }
 }

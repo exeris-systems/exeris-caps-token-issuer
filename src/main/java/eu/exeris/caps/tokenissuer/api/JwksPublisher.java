@@ -1,10 +1,12 @@
 package eu.exeris.caps.tokenissuer.api;
 
-import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
-
 /**
  * Service responsible for publishing the JSON Web Key Set (JWKS) containing active
  * and retiring public keys.
+ *
+ * <p>The HTTP route is not part of this contract: it is registered through a
+ * {@link eu.exeris.caps.tokenissuer.spi.JwksRouteRegistrar}, so this interface names no type of an
+ * optional capability.
  *
  * @since 0.1.0
  */
@@ -23,11 +25,4 @@ public interface JwksPublisher {
      * @return structured JWKS document
      */
     JwksDocument getJwksDocument();
-
-    /**
-     * Registers the HTTP route {@code GET /.well-known/jwks.json} with the given service boundary registry.
-     *
-     * @param registry service boundary API surface registry; non-null
-     */
-    void registerBoundaryRoute(ApiSurfaceRegistry registry);
 }

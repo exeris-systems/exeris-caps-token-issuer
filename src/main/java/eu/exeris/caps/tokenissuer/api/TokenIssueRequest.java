@@ -21,7 +21,7 @@ import java.util.UUID;
  * @param tenantId     the {@code tid} claim; nullable, omitted when null, otherwise non-blank
  * @param roles        the {@code roles} claim; never null, omitted when empty
  * @param customClaims additional claims; never null, no reserved name, JSON-serialisable values only
- * @param ttl          token lifetime; nullable (the configured default), otherwise positive
+ * @param ttl          token lifetime; nullable (the configured default), otherwise a whole number of seconds, at least one
  * @since 0.1.0
  */
 public record TokenIssueRequest(
@@ -59,9 +59,18 @@ public record TokenIssueRequest(
             }
             requireJsonValue(name, entry.getValue());
         }
-        if (ttl != null && (ttl.isNegative() || ttl.isZero())) {
-            throw new IllegalArgumentException("ttl must be positive");
+        if (ttl != null && !isWholeSeconds(ttl)) {
+            throw new IllegalArgumentException("ttl must be a whole number of seconds, at least 1: " + ttl);
         }
+    }
+
+    /**
+     * Whether {@code duration} is a whole number of seconds of at least one. JWT time claims are whole
+     * seconds, so a lifetime with a fractional part would make the {@code exp} claim disagree with the
+     * expiry the issuer reports, and a lifetime under one second would put {@code exp} at {@code iat}.
+     */
+    public static boolean isWholeSeconds(Duration duration) {
+        return duration.getNano() == 0 && duration.getSeconds() >= 1;
     }
 
     public static Builder builder() {
