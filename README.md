@@ -59,6 +59,7 @@ Both passes are needed after a `clean`: `exeris:generate` runs before `compile`,
 
 ## Documentation
 
+- [`ROADMAP.md`](ROADMAP.md) — what the proof of concept does not cover yet.
 - [`AGENTS.md`](AGENTS.md) — the repository's operating contract and invariants.
 - [Capability Author Guide](https://github.com/exeris-systems/exeris-docs/blob/main/cap-author-guide.md) — how a cap declares `@CapabilityModule`, `@Provides`, `@Requires` and `@CapabilityLifecycle`.
 - [Capability licence registry](https://github.com/exeris-systems/exeris-docs/blob/main/cap-license-registry.md) — the licence value of every cap.
