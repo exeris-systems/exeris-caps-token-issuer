@@ -82,12 +82,13 @@ S4. **A community capability registers no entitlement.** This capability is `com
 
 S5. **No dependency creep.** The runtime classpath stays what the POM declares:
     `exeris-sdk-annotations` at `provided` (every Exeris annotation is `@Retention(SOURCE)`), the
-    kernel dependencies `exeris-kernel-spi` and `exeris-kernel-core` (at the scope the POM gives the
-    SPI, `compile`, the Maven default), and the sibling capabilities the README lists; README
-    `Depends on` lists what the POM declares and moves with it. A new `compile`-scope dependency
-    other than those, a logging implementation such as Logback or Log4j (use `System.Logger`,
-    ADR-060), or a new sibling capability with no matching `@Requires` or README line →
-    `[CONTRACT]`. Reading an Exeris annotation at runtime → `[HARD BLOCK]`.
+    kernel dependency `exeris-kernel-spi` at `compile`, the Maven default, which is the one the POM
+    declares (`exeris-kernel-core` is permitted at the same scope when it is added), and the sibling
+    capabilities the README lists; README `Depends on` lists what the POM declares and moves with
+    it. A new `compile`-scope dependency other than those, a logging implementation such as Logback
+    or Log4j (use `System.Logger`, ADR-060), or a new sibling capability with no matching
+    `@Requires` or README line → `[CONTRACT]`. Reading an Exeris annotation at runtime →
+    `[HARD BLOCK]`.
 
 S6. **The build baseline and the test contract hold** (`AGENTS.md` §2, `CONTRIBUTING.md`).
     `maven.compiler.release` stays 25 and no `--enable-preview` appears in any scope →
