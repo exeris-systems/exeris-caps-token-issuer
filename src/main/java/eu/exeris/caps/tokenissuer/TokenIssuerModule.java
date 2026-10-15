@@ -3,6 +3,7 @@ package eu.exeris.caps.tokenissuer;
 import eu.exeris.caps.audittrail.api.AuditLogSink;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.tokenissuer.api.AccessTokenIssuer;
+import eu.exeris.caps.tokenissuer.api.DevelopmentKeys;
 import eu.exeris.caps.tokenissuer.api.JwksPublisher;
 import eu.exeris.caps.tokenissuer.api.SigningKeyRotation;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
@@ -26,6 +27,7 @@ import eu.exeris.sdk.annotation.capability.Provides;
 import eu.exeris.sdk.annotation.capability.Requires;
 import eu.exeris.sdk.composition.lifecycle.CapabilityLifecycleHooks;
 
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
@@ -60,8 +62,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       {@code true}: without the scheduler nothing publishes, promotes or retires keys, so a
  *       deployment that runs those steps itself says so explicitly.</li>
  * </ul>
- * {@link #inMemoryForDevelopment(Map, JobScheduler, JwksRouteRegistrar, AuditRecorder)} is the one
- * way to hold keys in process memory, unsealed, and its name says it is for development and tests.
+ * {@link #inMemoryForDevelopment(DevelopmentKeys, Map, JobScheduler, JwksRouteRegistrar, AuditRecorder)}
+ * is the one way to hold keys in process memory, unsealed, and requires an explicit acknowledgement
+ * and a development issuer.
  *
  * <p>No constructor or method signature of this class names a type of an optional capability: the
  * audit-trail sink and the service-boundary registry are adapted by
@@ -164,24 +167,68 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
      * development and tests only: it needs no database and no keyring, and offers none of the custody
      * the wired constructor guarantees.
      *
+     * <p>Requires an explicit {@link DevelopmentKeys#UNSEALED_ACKNOWLEDGED} acknowledgement and that
+     * the configured issuer is a development issuer (a {@code urn:} URI or an
+     * {@code http(s)://localhost|127.0.0.1} URL).
+     *
+     * @param acknowledgement    explicit acknowledgement that development keys are unsealed and
+     *                           must never be used in production; non-null
+     * @param environment        environment-style configuration; non-null
+     * @param scheduler          kernel job scheduler; required unless manual rotation is configured
+     * @param jwksRouteRegistrar publishes {@code GET /.well-known/jwks.json}; {@code null} when none
+     * @param auditRecorder      security audit receiver; {@code null} when none
+     * @throws NullPointerException              when acknowledgement or environment is null
+     * @throws IllegalStateException             when the configured issuer is not a development issuer
      * @throws TokenIssuerConfigurationException when configuration or the scheduler is missing or malformed
      */
     public static TokenIssuerModule inMemoryForDevelopment(
+            DevelopmentKeys acknowledgement,
             Map<String, String> environment,
             JobScheduler scheduler,
             JwksRouteRegistrar jwksRouteRegistrar,
             AuditRecorder auditRecorder
     ) {
+        Objects.requireNonNull(acknowledgement, "acknowledgement must not be null");
+        TokenIssuerConfig config = TokenIssuerConfig.fromEnvironment(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        if (!isDevelopmentIssuer(config.issuer())) {
+            throw new IllegalStateException("development signing keys are only permitted with a development issuer "
+                    + "(urn:... or http(s)://localhost|127.0.0.1): " + config.issuer());
+        }
         LOG.log(System.Logger.Level.WARNING,
                 "token issuer signing keys are held unsealed in process memory: development use only");
         return new TokenIssuerModule(
-                TokenIssuerConfig.fromEnvironment(Objects.requireNonNull(environment, "environment must not be null")),
+                config,
                 new InMemorySigningKeyRepository(),
                 jwksRouteRegistrar,
                 scheduler,
                 auditRecorder != null ? new TokenIssuerAuditBridge(auditRecorder, Clock.systemUTC()) : null,
                 Clock.systemUTC()
         );
+    }
+
+    private static boolean isDevelopmentIssuer(String issuer) {
+        if (issuer == null || issuer.isBlank()) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(issuer);
+            String scheme = uri.getScheme();
+            if (scheme == null) {
+                return false;
+            }
+            if ("urn".equalsIgnoreCase(scheme)) {
+                String ssp = uri.getSchemeSpecificPart();
+                return ssp != null && !ssp.isBlank();
+            }
+            if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                String host = uri.getHost();
+                return host != null && (host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1"));
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     TokenIssuerModule(

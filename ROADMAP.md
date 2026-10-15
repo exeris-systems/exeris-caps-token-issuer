@@ -18,16 +18,6 @@ tracking issue in the `0.1.0` milestone and is linked here; a later gap is recor
 
 ## Before 0.1.0
 
-### The in-memory keystore is on the public surface
-
-`TokenIssuerModule.inMemoryForDevelopment(...)` is a public static method of the public module
-class. It builds a module whose signing keys are unsealed, held in process memory, lost at restart
-and not shared between nodes. The only guard is its name and a warning log line, so a production
-composition can reach it by accident while the README states that there is no other in-memory path.
-The wired constructor is fail-closed; the factory beside it is not. The fix is to remove it from the
-public API or to put it behind an opt-in the wired constructor never reads. Code: `TokenIssuerModule.java` in the `tokenissuer` package. Tracking issue:
-[#13](https://github.com/exeris-systems/exeris-caps-token-issuer/issues/13).
-
 ### A compromised key cannot be withdrawn quickly
 
 No operation withdraws a key. `SigningKeyRotation.rotateKeys()` publishes a successor that signs only
