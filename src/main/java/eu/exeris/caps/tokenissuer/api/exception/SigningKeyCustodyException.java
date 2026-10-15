@@ -8,7 +8,7 @@ import java.util.Objects;
  * <p>There is no fallback: a record that is not a sealed envelope, names a key-encryption key the
  * keyring does not hold, or fails AEAD authentication is refused, and no token is signed with it.
  *
- * @since 0.2.0
+ * @since 0.1.0
  */
 public class SigningKeyCustodyException extends TokenIssuerException {
 
@@ -44,7 +44,9 @@ public class SigningKeyCustodyException extends TokenIssuerException {
     }
 
     /**
-     * @return the signing key id of the refused record
+     * Returns the signing key id of the refused record.
+     *
+     * @return the signing key id
      */
     public String kid() {
         return kid;

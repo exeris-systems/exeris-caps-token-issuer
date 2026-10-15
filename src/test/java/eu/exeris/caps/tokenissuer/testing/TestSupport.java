@@ -1,5 +1,7 @@
 package eu.exeris.caps.tokenissuer.testing;
 
+import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
+import eu.exeris.caps.tokenissuer.api.SigningKeyRotation;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
 
 import java.security.SecureRandom;
@@ -26,6 +28,18 @@ public final class TestSupport {
 
     public static TokenIssuerConfig config() {
         return TokenIssuerConfig.of(ISSUER, AUDIENCE);
+    }
+
+    /**
+     * Completes a rotation the way production does: the next key is published, the clock moves past
+     * the JWKS cache lifetime, and the key is promoted.
+     *
+     * @return the newly active key
+     */
+    public static SigningKeyInfo rotateAndActivate(SigningKeyRotation rotation, MutableClock clock, TokenIssuerConfig config) {
+        rotation.rotateKeys();
+        clock.advance(config.jwksMaxAge());
+        return rotation.rotateIfDue();
     }
 
     /** A fresh random 32-byte key-encryption key, Base64-encoded. */

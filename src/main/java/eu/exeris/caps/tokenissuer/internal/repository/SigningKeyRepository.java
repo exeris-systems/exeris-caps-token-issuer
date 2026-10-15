@@ -38,22 +38,24 @@ public interface SigningKeyRepository {
     Optional<SigningKeyRecord> findByKid(String kid);
 
     /**
-     * Retrieves the keys the JWKS publishes at {@code now}: the {@link KeyState#ACTIVE} key and every
-     * {@link KeyState#RETIRING} key whose {@code retiredAt} is after {@code now}. A retiring key's
-     * {@code retiredAt} is set when it stops signing, so publication ends on time whether or not
-     * {@code retireExpiredKeys} has run.
+     * Retrieves the public keys the JWKS publishes at {@code now}: every {@link KeyState#PENDING} and
+     * {@link KeyState#ACTIVE} key and every {@link KeyState#RETIRING} key whose {@code retiredAt} is
+     * after {@code now}. A retiring key's {@code retiredAt} is the end of its publication window,
+     * so publication ends on time whether or not {@code retireExpiredKeys} has run. Private key material
+     * is neither read nor unsealed.
      *
      * @param now reference instant
-     * @return publishable key records, newest first
+     * @return publishable public keys, newest first
      */
-    List<SigningKeyRecord> findPublishable(Instant now);
+    List<PublicSigningKey> findPublishablePublicKeys(Instant now);
 
     /**
-     * Retrieves all recorded signing key records ordered by creation date descending.
+     * Retrieves the metadata of all recorded signing keys ordered by creation date descending,
+     * without reading or unsealing any private key.
      *
-     * @return list of all key records
+     * @return list of all key descriptors
      */
-    List<SigningKeyRecord> findAll();
+    List<SigningKeyInfo> findAllInfo();
 
     /**
      * Updates the lifecycle state and optional retired timestamp of a key.

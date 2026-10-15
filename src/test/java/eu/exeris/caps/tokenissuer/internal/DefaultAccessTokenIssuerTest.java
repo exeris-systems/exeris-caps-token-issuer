@@ -121,13 +121,31 @@ class DefaultAccessTokenIssuerTest {
     }
 
     @Test
-    @DisplayName("a key past its expiresAt never signs: issuance rotates first")
+    @DisplayName("a key past its expiresAt never signs: its successor is published first and signs once it has matured")
     void expiredKeyDoesNotSign() throws Exception {
         String firstKid = rotation.ensureActiveKey().kid();
         clock.advance(config.keyTtl().plusSeconds(1));
 
+        assertThatThrownBy(() -> issuer.issueAccessToken(UUID.randomUUID(), null))
+                .isInstanceOf(eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException.class);
+        clock.advance(config.jwksMaxAge());
+
         IssuedAccessToken token = issuer.issueAccessToken(UUID.randomUUID(), null);
         String kid = (String) decode(token.token().split("\\.")[0]).get("kid");
         assertThat(kid).isNotEqualTo(firstKid);
+    }
+
+    @Test
+    @DisplayName("the reported expiry equals the exp claim and exp is after iat, at a fractional clock reading")
+    void expiryEqualsClaimAndFollowsIssuedAt() throws Exception {
+        IssuedAccessToken token = issuer.issueAccessToken(TokenIssueRequest.builder()
+                .subjectId(UUID.randomUUID()).ttl(Duration.ofSeconds(1)).build());
+
+        Map<String, Object> payload = decode(token.token().split("\\.")[1]);
+        long iat = ((Number) payload.get("iat")).longValue();
+        long exp = ((Number) payload.get("exp")).longValue();
+        assertThat(exp).isGreaterThan(iat);
+        assertThat(token.expiresAt().getEpochSecond()).isEqualTo(exp);
+        assertThat(token.expiresAt().getNano()).isZero();
     }
 }

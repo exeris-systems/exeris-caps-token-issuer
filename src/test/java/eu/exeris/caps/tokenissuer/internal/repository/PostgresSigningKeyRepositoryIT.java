@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p>The database comes from {@code EXERIS_TEST_PG_URL}, {@code EXERIS_TEST_PG_USER} and
  * {@code EXERIS_TEST_PG_PASSWORD} when they are set; otherwise from a Testcontainers PostgreSQL
- * with a generated password. Without either, the class is skipped.
+ * with a generated password. Without either, the class is skipped locally and fails when {@code CI} is set.
  */
 class PostgresSigningKeyRepositoryIT {
 
@@ -64,8 +64,14 @@ class PostgresSigningKeyRepositoryIT {
         if (url != null && !url.isBlank()) {
             tx = new JdbcTransactionalExecutor(url, System.getenv("EXERIS_TEST_PG_USER"), System.getenv("EXERIS_TEST_PG_PASSWORD"));
         } else {
-            Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
-                    "no EXERIS_TEST_PG_URL and no Docker; skipping PostgreSQL integration test");
+            // CI sets CI=true, and there a missing Docker daemon must fail the build, not skip the test.
+            if (System.getenv("CI") != null) {
+                assertThat(DockerClientFactory.instance().isDockerAvailable())
+                        .as("CI needs a Docker daemon for the PostgreSQL integration test").isTrue();
+            } else {
+                Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                        "no EXERIS_TEST_PG_URL and no Docker; skipping PostgreSQL integration test");
+            }
             container = new PostgreSQLContainer<>("postgres:17-alpine")
                     .withPassword(UUID.randomUUID().toString());
             container.start();
@@ -120,6 +126,7 @@ class PostgresSigningKeyRepositoryIT {
         Map<String, String> env = Map.of(
                 TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
                 TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
                 KeyEncryptionKeyring.ENV_KEKS, "kek-it:" + TestSupport.newKek());
         TokenIssuerModule module = new TokenIssuerModule(env, tx, null, null, null);
         module.initialize();
@@ -172,6 +179,7 @@ class PostgresSigningKeyRepositoryIT {
         Map<String, String> env = Map.of(
                 TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
                 TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
                 KeyEncryptionKeyring.ENV_KEKS, "k1:" + TestSupport.newKek());
         TokenIssuerModule module = new TokenIssuerModule(env, tx, null, null, null);
         assertThatThrownBy(() -> module.accessTokenIssuer().issueAccessToken(UUID.randomUUID(), null))
@@ -207,12 +215,12 @@ class PostgresSigningKeyRepositoryIT {
         rotation.rotateKeys();
 
         PostgresSigningKeyRepository both = new PostgresSigningKeyRepository(tx, ring("new:" + newKek + ",old:" + oldKek));
-        assertThat(both.findAll()).hasSize(2);
+        assertThat(both.findAllInfo()).hasSize(2);
         assertThat(both.resealWithActiveKek()).isEqualTo(2);
         assertThat(both.resealWithActiveKek()).isZero();
 
         PostgresSigningKeyRepository onlyNew = new PostgresSigningKeyRepository(tx, ring("new:" + newKek));
-        assertThat(onlyNew.findAll()).hasSize(2);
+        assertThat(onlyNew.findAllInfo()).hasSize(2);
     }
 
     @Test
@@ -226,7 +234,7 @@ class PostgresSigningKeyRepositoryIT {
 
         String first = rotation.ensureActiveKey().kid();
         clock.advance(java.time.Duration.ofMinutes(10));
-        String second = rotation.rotateKeys().kid();
+        String second = TestSupport.rotateAndActivate(rotation, clock, config).kid();
         Instant windowEnd = clock.instant().plus(config.publicationOverlap());
 
         clock.set(windowEnd.minusSeconds(1));
@@ -236,5 +244,27 @@ class PostgresSigningKeyRepositoryIT {
         assertThat(jwks.getJwksDocument().keys()).extracting(k -> k.get("kid")).containsExactly(second);
         assertThat(rotation.retireExpiredKeys()).isEqualTo(1);
         assertThat(repository.findByKid(first).orElseThrow().state()).isEqualTo(KeyState.RETIRED);
+    }
+
+    @Test
+    @DisplayName("the JWKS and the key listing read public data only: they work with no usable KEK and never unseal")
+    void jwksAndListingNeverUnsealPrivateKeys() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-02-01T00:00:00Z"));
+        TokenIssuerConfig config = TestSupport.config();
+        PostgresSigningKeyRepository writer = new PostgresSigningKeyRepository(tx, ring("k1:" + TestSupport.newKek()));
+        DefaultSigningKeyRotation rotation = new DefaultSigningKeyRotation(writer, config, null, null, clock);
+        String first = rotation.ensureActiveKey().kid();
+        String second = TestSupport.rotateAndActivate(rotation, clock, config).kid();
+        String pending = rotation.rotateKeys().kid();
+
+        PostgresSigningKeyRepository noKek = new PostgresSigningKeyRepository(tx, ring("other:" + TestSupport.newKek()));
+        assertThatThrownBy(() -> noKek.findByKid(first)).isInstanceOf(SigningKeyCustodyException.class);
+
+        DefaultJwksPublisher jwks = new DefaultJwksPublisher(noKek, clock);
+        assertThat(jwks.getJwksDocument().keys()).extracting(k -> k.get("kid"))
+                .containsExactlyInAnyOrder(first, second, pending);
+        assertThat(new DefaultSigningKeyRotation(noKek, config, null, null, clock).listKeyGenerations())
+                .extracting(SigningKeyInfo::state)
+                .containsExactlyInAnyOrder(KeyState.RETIRING, KeyState.ACTIVE, KeyState.PENDING);
     }
 }

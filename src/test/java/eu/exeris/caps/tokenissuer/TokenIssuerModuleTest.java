@@ -1,18 +1,25 @@
 package eu.exeris.caps.tokenissuer;
 
+import eu.exeris.caps.serviceboundarycore.api.AdmissionFilter;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRoute;
+import eu.exeris.caps.serviceboundarycore.api.RequestFilterChain;
 import eu.exeris.caps.serviceboundarycore.api.RouteMatch;
 import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
 import eu.exeris.caps.tokenissuer.api.exception.TokenIssuerConfigurationException;
+import eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar;
 import eu.exeris.caps.tokenissuer.testing.TestSupport;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.TransactionIsolation;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
 import eu.exeris.kernel.spi.http.HttpExchange;
 import eu.exeris.kernel.spi.http.HttpMethod;
+import eu.exeris.kernel.spi.scheduling.JobDescriptor;
+import eu.exeris.kernel.spi.scheduling.JobHandle;
+import eu.exeris.kernel.spi.scheduling.JobScheduler;
+import eu.exeris.kernel.spi.scheduling.JobState;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +41,32 @@ class TokenIssuerModuleTest {
             TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
             TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE);
 
+    private static final Map<String, String> MANUAL_ENV = Map.of(
+            TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+            TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+            TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
+
+    private static final class RecordingScheduler implements JobScheduler {
+        final List<JobDescriptor> submitted = new ArrayList<>();
+        boolean cancelled;
+
+        @Override
+        public JobHandle submit(JobDescriptor descriptor) {
+            submitted.add(descriptor);
+            return new JobHandle() {
+                @Override public String jobId() { return "job-1"; }
+                @Override public String jobName() { return descriptor.jobName(); }
+                @Override public JobState state() { return JobState.SCHEDULED; }
+                @Override public boolean cancel() { cancelled = true; return true; }
+            };
+        }
+
+        @Override public JobHandle handle(String jobName) { return null; }
+        @Override public void close() {
+            // Nothing is held open: the scheduler only records what is submitted.
+        }
+    }
+
     /** Present only so the module selects persistent storage; construction must fail before any use. */
     private static final TransactionalExecutor UNUSED_TX = new TransactionalExecutor() {
         @Override public void execute(TransactionalWork work) { throw new AssertionError("not reached"); }
@@ -47,22 +80,23 @@ class TokenIssuerModuleTest {
     @Test
     @DisplayName("persistent storage without a key-encryption keyring fails construction, typed and closed")
     void missingKekFailsBoot() {
-        assertThatThrownBy(() -> new TokenIssuerModule(ENV, UNUSED_TX, null, null, null))
+        RecordingScheduler scheduler = new RecordingScheduler();
+        assertThatThrownBy(() -> new TokenIssuerModule(ENV, UNUSED_TX, scheduler, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo("EXERIS_TOKEN_ISSUER_KEKS"));
 
         Map<String, String> malformed = new HashMap<>(ENV);
         malformed.put("EXERIS_TOKEN_ISSUER_KEKS", "k1:c2hvcnQ=");
-        assertThatThrownBy(() -> new TokenIssuerModule(malformed, UNUSED_TX, null, null, null))
+        assertThatThrownBy(() -> new TokenIssuerModule(malformed, UNUSED_TX, scheduler, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class);
     }
 
     @Test
     @DisplayName("a missing issuer or audience fails construction for in-memory storage too")
     void missingIssuerFailsBoot() {
-        assertThatThrownBy(() -> new TokenIssuerModule(Map.of(TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE),
-                null, null, null, null))
+        Map<String, String> withoutIssuer = Map.of(TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE);
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(withoutIssuer, null, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo(TokenIssuerConfig.ENV_ISSUER));
@@ -105,9 +139,57 @@ class TokenIssuerModuleTest {
 
             @Override
             public void handle(HttpExchange exchange) {}
+
+
+            @Override
+
+            public RequestFilterChain filterChain() {
+
+                return RequestFilterChain.empty();
+
+            }
+
+
+
+            @Override
+
+
+            public void registerFilter(AdmissionFilter filter) {
+
+
+                filterChain().registerFilter(filter);
+
+
+            }
+
+
+
+            @Override
+
+
+            public boolean unregisterFilter(AdmissionFilter filter) {
+
+
+                return false;
+
+
+            }
+
+
+
+            @Override
+
+
+            public List<AdmissionFilter> filters() {
+
+
+                return List.of();
+
+
+            }
         };
 
-        TokenIssuerModule module = new TokenIssuerModule(ENV, null, null, mockRegistry, null);
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(MANUAL_ENV, null, new ApiSurfaceRegistryRegistrar(mockRegistry), null);
 
         assertThat(module.isInitialized()).isFalse();
         assertThat(module.isReady()).isFalse();
@@ -140,5 +222,60 @@ class TokenIssuerModuleTest {
 
         module.terminate();
         assertThat(module.isInitialized()).isFalse();
+    }
+
+    @Test
+    @DisplayName("without a TransactionalExecutor construction fails: there is no silent in-memory plaintext store")
+    void missingTransactionalExecutorFailsClosed() {
+        assertThatThrownBy(() -> new TokenIssuerModule(MANUAL_ENV, null, null, null, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("TransactionalExecutor");
+    }
+
+    @Test
+    @DisplayName("without a scheduler construction fails unless manual rotation is explicitly configured")
+    void missingSchedulerFailsUnlessManual() {
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(ENV, null, null, null))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
+                        .isEqualTo(TokenIssuerConfig.ENV_MANUAL_ROTATION));
+
+        Map<String, String> withKek = new HashMap<>(ENV);
+        withKek.put("EXERIS_TOKEN_ISSUER_KEKS", "k1:" + TestSupport.newKek());
+        assertThatThrownBy(() -> new TokenIssuerModule(withKek, UNUSED_TX, null, null, null))
+                .isInstanceOf(TokenIssuerConfigurationException.class)
+                .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
+                        .isEqualTo(TokenIssuerConfig.ENV_MANUAL_ROTATION));
+
+        assertThat(TokenIssuerModule.inMemoryForDevelopment(MANUAL_ENV, null, null, null)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("with a scheduler, ready submits the rotation job and drain cancels it")
+    void schedulerRunsTheRotationJob() throws Exception {
+        RecordingScheduler scheduler = new RecordingScheduler();
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(ENV, scheduler, null, null);
+
+        module.ready();
+        assertThat(scheduler.submitted).hasSize(1);
+        assertThat(scheduler.submitted.getFirst().jobName()).isEqualTo("exeris-token-issuer-key-rotation");
+        scheduler.submitted.getFirst().body().run();
+        assertThat(module.signingKeyRotation().activeKey()).isNotNull();
+
+        module.drain(Duration.ofSeconds(1));
+        assertThat(scheduler.cancelled).isTrue();
+    }
+
+    @Test
+    @DisplayName("the no-arg instance is lifecycle-only: it reads no configuration and serves no service")
+    void lifecycleOnlyInstance() throws Exception {
+        TokenIssuerModule module = new TokenIssuerModule();
+        module.initialize();
+        module.ready();
+        assertThat(module.isReady()).isTrue();
+        assertThatThrownBy(module::accessTokenIssuer).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(module::jwksPublisher).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(module::signingKeyRotation).isInstanceOf(IllegalStateException.class);
+        module.terminate();
     }
 }
