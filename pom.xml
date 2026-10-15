@@ -40,7 +40,7 @@
 
         <junit.version>5.11.4</junit.version>
         <assertj.version>3.27.7</assertj.version>
-        <jose4j.version>0.9.6</jose4j.version>
+        <jose4j.version>0.9.7</jose4j.version>
         <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
