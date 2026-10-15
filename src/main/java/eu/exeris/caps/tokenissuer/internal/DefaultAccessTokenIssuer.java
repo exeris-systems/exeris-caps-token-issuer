@@ -27,8 +27,9 @@ import java.util.UUID;
  * {@code iat = nbf = now}, {@code exp = now + ttl} and a fresh {@code jti}; {@code tid},
  * {@code sid} and {@code roles} when the request carries them. {@code ttl} never exceeds
  * {@link TokenIssuerConfig#maxTokenTtl()}, which is what bounds how long a retired key must stay
- * published. Times are whole seconds from the injected {@link Clock}, so the returned
- * {@code expiresAt} equals the {@code exp} claim.
+ * published. {@code iat} is the injected {@link Clock} truncated to whole seconds and {@code ttl} is a whole
+ * number of seconds, so the returned {@code expiresAt} equals the {@code exp} claim and
+ * {@code exp > iat}.
  *
  * @since 0.1.0
  */

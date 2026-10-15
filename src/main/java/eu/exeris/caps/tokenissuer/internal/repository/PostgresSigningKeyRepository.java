@@ -171,23 +171,25 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
     }
 
     @Override
-    public List<SigningKeyRecord> findPublishable(Instant now) {
+    public List<PublicSigningKey> findPublishablePublicKeys(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
         String sql = """
-                SELECT kid, algorithm, public_key_jwk, public_key_bytes, private_key_pkcs8, state, created_at, expires_at, retired_at
+                SELECT kid, public_key_bytes
                 FROM exeris_signing_keys
-                WHERE state = $1 OR (state = $2 AND retired_at > $3)
+                WHERE state IN ($1, $2) OR (state = $3 AND retired_at > $4)
                 ORDER BY created_at DESC
                 """;
         return tx.query(conn -> {
             try (PersistenceStatement stmt = conn.prepare(sql)) {
-                stmt.bindString(0, KeyState.ACTIVE.name())
-                    .bindString(1, KeyState.RETIRING.name())
-                    .bindInstant(2, now);
+                stmt.bindString(0, KeyState.PENDING.name())
+                    .bindString(1, KeyState.ACTIVE.name())
+                    .bindString(2, KeyState.RETIRING.name())
+                    .bindInstant(3, now);
                 try (QueryResult rs = stmt.executeQuery()) {
-                    List<SigningKeyRecord> list = new ArrayList<>();
+                    List<PublicSigningKey> list = new ArrayList<>();
                     while (rs.next()) {
-                        list.add(mapRow(rs.row()));
+                        RowCursor row = rs.row();
+                        list.add(new PublicSigningKey(row.getString(0), row.getBytes(1)));
                     }
                     return list;
                 }
@@ -196,18 +198,21 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
     }
 
     @Override
-    public List<SigningKeyRecord> findAll() {
+    public List<SigningKeyInfo> findAllInfo() {
         String sql = """
-                SELECT kid, algorithm, public_key_jwk, public_key_bytes, private_key_pkcs8, state, created_at, expires_at, retired_at
+                SELECT kid, algorithm, state, created_at, expires_at, retired_at
                 FROM exeris_signing_keys
                 ORDER BY created_at DESC
                 """;
         return tx.query(conn -> {
             try (PersistenceStatement stmt = conn.prepare(sql)) {
                 try (QueryResult rs = stmt.executeQuery()) {
-                    List<SigningKeyRecord> list = new ArrayList<>();
+                    List<SigningKeyInfo> list = new ArrayList<>();
                     while (rs.next()) {
-                        list.add(mapRow(rs.row()));
+                        RowCursor row = rs.row();
+                        list.add(new SigningKeyInfo(row.getString(0), row.getString(1),
+                                KeyState.valueOf(row.getString(2)), row.getInstant(3), row.getInstant(4),
+                                row.isNull(5) ? null : row.getInstant(5)));
                     }
                     return list;
                 }

@@ -80,6 +80,11 @@ jobs:
             exit 1
           fi
 
+      # PostgresSigningKeyRepositoryIT starts a PostgreSQL container (Testcontainers) and is the only
+      # test that runs the SQL, so a runner without a Docker daemon must fail the build, not skip it.
+      - name: Check that a Docker daemon is available
+        run: docker info --format '{{.ServerVersion}}'
+
       # japicmp.skip: the SDK binds a semver gate to verify whose baseline is the previous release
       # jar, which a runner cannot resolve. That gate belongs to the SDK's own CI.
       - name: Install exeris-sdk to the local repository
@@ -113,6 +118,20 @@ jobs:
       - name: mvn verify (second pass — generates, validates, scans the Wall)
         working-directory: exeris-caps-token-issuer
         run: mvn -B -ntp -s .github/maven-settings.xml verify
+
+      - name: Assert the PostgreSQL integration test ran
+        working-directory: exeris-caps-token-issuer
+        run: |
+          REPORT=target/surefire-reports/TEST-eu.exeris.caps.tokenissuer.internal.repository.PostgresSigningKeyRepositoryIT.xml
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::no surefire report for PostgresSigningKeyRepositoryIT"
+            exit 1
+          fi
+          if ! grep -Eq 'tests="[1-9][0-9]*" errors="0" skipped="0" failures="0"' "$REPORT"; then
+            echo "::error::PostgresSigningKeyRepositoryIT did not run to completion without skips"
+            grep -o '<testsuite [^>]*>' "$REPORT"
+            exit 1
+          fi
 
       - name: Assert the cap manifest was emitted and stamped
         working-directory: exeris-caps-token-issuer

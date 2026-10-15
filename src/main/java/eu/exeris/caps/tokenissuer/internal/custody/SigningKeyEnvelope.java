@@ -111,6 +111,8 @@ public final class SigningKeyEnvelope {
     }
 
     /**
+     * Reads the KEK id an envelope names without opening it.
+     *
      * @return the KEK id an envelope names, or {@code null} when the bytes are not an envelope
      */
     public static String kekIdOf(byte[] sealed) {

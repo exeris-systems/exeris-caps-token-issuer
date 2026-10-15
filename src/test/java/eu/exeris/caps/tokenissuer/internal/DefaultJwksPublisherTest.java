@@ -1,7 +1,9 @@
 package eu.exeris.caps.tokenissuer.internal;
 
+import eu.exeris.caps.serviceboundarycore.api.AdmissionFilter;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRoute;
+import eu.exeris.caps.serviceboundarycore.api.RequestFilterChain;
 import eu.exeris.caps.serviceboundarycore.api.RouteMatch;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 import eu.exeris.caps.tokenissuer.internal.boundary.JwksHttpRoute;
@@ -103,9 +105,57 @@ class DefaultJwksPublisherTest {
             @Override
             public void handle(HttpExchange exchange) {
             }
+
+
+            @Override
+
+            public RequestFilterChain filterChain() {
+
+                return RequestFilterChain.empty();
+
+            }
+
+
+
+            @Override
+
+
+            public void registerFilter(AdmissionFilter filter) {
+
+
+                filterChain().registerFilter(filter);
+
+
+            }
+
+
+
+            @Override
+
+
+            public boolean unregisterFilter(AdmissionFilter filter) {
+
+
+                return false;
+
+
+            }
+
+
+
+            @Override
+
+
+            public List<AdmissionFilter> filters() {
+
+
+                return List.of();
+
+
+            }
         };
 
-        publisher.registerBoundaryRoute(registry);
+        new eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar(registry).registerJwksRoute(publisher::getJwksJson, java.time.Duration.ofMinutes(5));
 
         assertThat(registered).hasSize(1);
         ApiSurfaceRoute route = registered.get(0);

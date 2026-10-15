@@ -1,6 +1,7 @@
 package eu.exeris.caps.tokenissuer.internal.repository;
 
 import eu.exeris.caps.tokenissuer.api.KeyState;
+import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,19 +43,22 @@ public final class InMemorySigningKeyRepository implements SigningKeyRepository 
     }
 
     @Override
-    public synchronized List<SigningKeyRecord> findPublishable(Instant now) {
+    public synchronized List<PublicSigningKey> findPublishablePublicKeys(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
         return keys.values().stream()
                 .filter(k -> k.state() == KeyState.ACTIVE
+                        || k.state() == KeyState.PENDING
                         || (k.state() == KeyState.RETIRING && k.retiredAt() != null && now.isBefore(k.retiredAt())))
                 .sorted(Comparator.comparing(SigningKeyRecord::createdAt).reversed())
+                .map(k -> new PublicSigningKey(k.kid(), k.publicKeyRawBytes()))
                 .toList();
     }
 
     @Override
-    public synchronized List<SigningKeyRecord> findAll() {
+    public synchronized List<SigningKeyInfo> findAllInfo() {
         return keys.values().stream()
                 .sorted(Comparator.comparing(SigningKeyRecord::createdAt).reversed())
+                .map(SigningKeyRecord::toInfo)
                 .toList();
     }
 
