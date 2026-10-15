@@ -20,6 +20,7 @@ import eu.exeris.kernel.spi.scheduling.JobTrigger;
 import java.security.KeyPair;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -154,7 +155,8 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
     /**
      * Advances the lifecycle under the repository's cluster lock, then the in-process monitor (see
      * the class comment for the lock order). Only metadata is read: no private key is unsealed to
-     * decide what to do.
+     * decide what to do. Audit events are collected while the lock is held and emitted after it
+     * returns, so a rolled-back transaction never leaves an event for a key that was not stored.
      *
      * <ol>
      *   <li>A pending key whose activation instant has passed becomes ACTIVE and every other ACTIVE
@@ -171,10 +173,12 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
      * @param forced start a rotation although the active key is not due
      */
     private SigningKeyInfo advance(boolean forced) {
-        return repository.rotateUnderClusterLock(() -> {
+        List<Runnable> auditEvents = new ArrayList<>();
+        SigningKeyInfo result = repository.rotateUnderClusterLock(() -> {
+            auditEvents.clear();
             synchronized (rotationMonitor) {
                 try {
-                    return advanceLocked(forced);
+                    return advanceLocked(forced, auditEvents);
                 } catch (TokenIssuerException e) {
                     throw e;
                 } catch (RuntimeException e) {
@@ -182,9 +186,11 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
                 }
             }
         });
+        auditEvents.forEach(Runnable::run);
+        return result;
     }
 
-    private SigningKeyInfo advanceLocked(boolean forced) {
+    private SigningKeyInfo advanceLocked(boolean forced, List<Runnable> auditEvents) {
         Instant now = clock.instant();
         List<SigningKeyInfo> all = repository.findAllInfo();
         SigningKeyInfo active = all.stream().filter(k -> k.state() == KeyState.ACTIVE).findFirst().orElse(null);
@@ -193,19 +199,19 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         SigningKeyInfo ready = retireExpiredPendingAndFindReady(pending, now);
         if (ready != null) {
             retireSurplusPending(pending, ready, now);
-            return promote(ready, all, now);
+            return promote(ready, all, now, auditEvents);
         }
 
         List<SigningKeyInfo> waiting = pending.stream().filter(k -> now.isBefore(k.expiresAt())).toList();
         if (active == null) {
             return waiting.isEmpty()
-                    ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()))
+                    ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()), auditEvents)
                     : waiting.get(0);
         }
         if (now.isBefore(active.expiresAt())) {
-            return advanceWhileActiveIsValid(active, waiting, forced, now);
+            return advanceWhileActiveIsValid(active, waiting, forced, now, auditEvents);
         }
-        return waiting.isEmpty() ? createPendingKey(now) : waiting.get(0);
+        return waiting.isEmpty() ? createPendingKey(now, auditEvents) : waiting.get(0);
     }
 
     /**
@@ -238,25 +244,27 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
      * {@code publicationLead} remains before it expires, or at once when the rotation is forced.
      */
     private SigningKeyInfo advanceWhileActiveIsValid(SigningKeyInfo active, List<SigningKeyInfo> waiting,
-                                                     boolean forced, Instant now) {
+                                                     boolean forced, Instant now,
+                                                     List<Runnable> auditEvents) {
         if (!waiting.isEmpty()) {
             return forced ? waiting.get(0) : active;
         }
         if (forced) {
-            return createPendingKey(now);
+            return createPendingKey(now, auditEvents);
         }
         if (!now.isBefore(active.expiresAt().minus(config.publicationLead()))) {
             createKey(KeyState.PENDING, now,
-                    max(active.expiresAt(), now.plus(config.jwksMaxAge())).plus(config.keyTtl()));
+                    max(active.expiresAt(), now.plus(config.jwksMaxAge())).plus(config.keyTtl()), auditEvents);
         }
         return active;
     }
 
-    private SigningKeyInfo createPendingKey(Instant now) {
-        return createKey(KeyState.PENDING, now, now.plus(config.jwksMaxAge()).plus(config.keyTtl()));
+    private SigningKeyInfo createPendingKey(Instant now, List<Runnable> auditEvents) {
+        return createKey(KeyState.PENDING, now, now.plus(config.jwksMaxAge()).plus(config.keyTtl()), auditEvents);
     }
 
-    private SigningKeyInfo promote(SigningKeyInfo ready, List<SigningKeyInfo> all, Instant now) {
+    private SigningKeyInfo promote(SigningKeyInfo ready, List<SigningKeyInfo> all, Instant now,
+                                   List<Runnable> auditEvents) {
         repository.updateState(ready.kid(), KeyState.ACTIVE, null);
         Instant retiredAt = now.plus(config.publicationOverlap());
         String replaced = null;
@@ -265,18 +273,20 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
                 repository.updateState(old.kid(), KeyState.RETIRING, retiredAt);
                 replaced = old.kid();
                 if (auditBridge != null) {
-                    auditBridge.logKeyRotated(ready.kid(), old.kid());
+                    String retiringKid = old.kid();
+                    auditEvents.add(() -> auditBridge.logKeyRotated(ready.kid(), retiringKid));
                 }
             }
         }
         if (replaced == null && auditBridge != null) {
-            auditBridge.logKeyRotated(ready.kid(), null);
+            auditEvents.add(() -> auditBridge.logKeyRotated(ready.kid(), null));
         }
         return new SigningKeyInfo(ready.kid(), ready.algorithm(), KeyState.ACTIVE, ready.createdAt(),
                 ready.expiresAt(), null);
     }
 
-    private SigningKeyInfo createKey(KeyState state, Instant createdAt, Instant expiresAt) {
+    private SigningKeyInfo createKey(KeyState state, Instant createdAt, Instant expiresAt,
+                                     List<Runnable> auditEvents) {
         KeyPair keyPair = Ed25519Signer.generateKeyPair();
         byte[] rawPub = Ed25519Signer.extractRawPublicKeyBytes(keyPair.getPublic());
         byte[] privPkcs8 = keyPair.getPrivate().getEncoded();
@@ -289,7 +299,7 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
                 privPkcs8, state, createdAt, expiresAt, null);
         repository.save(keyRecord);
         if (auditBridge != null) {
-            auditBridge.logKeyGenerated(kid);
+            auditEvents.add(() -> auditBridge.logKeyGenerated(kid));
         }
         return keyRecord.toInfo();
     }
