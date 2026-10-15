@@ -87,6 +87,7 @@ class TokenIssuerOptionalDependencyTest {
         for (String name : new String[]{
                 "eu.exeris.caps.tokenissuer.TokenIssuerModule",
                 "eu.exeris.caps.tokenissuer.api.AccessTokenIssuer",
+                "eu.exeris.caps.tokenissuer.api.DevelopmentKeys",
                 "eu.exeris.caps.tokenissuer.api.JwksPublisher",
                 "eu.exeris.caps.tokenissuer.api.SigningKeyRotation",
                 "eu.exeris.caps.tokenissuer.internal.DefaultAccessTokenIssuer",
@@ -106,14 +107,19 @@ class TokenIssuerOptionalDependencyTest {
         assertThat(module.getConstructor().newInstance()).isNotNull();
 
         java.util.Map<String, String> env = java.util.Map.of(
-                "EXERIS_TOKEN_ISSUER_ISSUER", "https://issuer.test.invalid",
+                "EXERIS_TOKEN_ISSUER_ISSUER", "urn:exeris:test:issuer",
                 "EXERIS_TOKEN_ISSUER_AUDIENCE", "https://audience.test.invalid",
                 "EXERIS_TOKEN_ISSUER_MANUAL_ROTATION", "true");
-        Object instance = module.getMethod("inMemoryForDevelopment", java.util.Map.class,
+        Class<?> devKeysEnum = probe.loadClass("eu.exeris.caps.tokenissuer.api.DevelopmentKeys");
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        Object ack = Enum.valueOf((Class<Enum>) devKeysEnum, "UNSEALED_ACKNOWLEDGED");
+        Object instance = module.getMethod("inMemoryForDevelopment",
+                devKeysEnum,
+                java.util.Map.class,
                 probe.loadClass("eu.exeris.kernel.spi.scheduling.JobScheduler"),
                 probe.loadClass("eu.exeris.caps.tokenissuer.spi.JwksRouteRegistrar"),
                 probe.loadClass("eu.exeris.caps.tokenissuer.spi.AuditRecorder"))
-                .invoke(null, env, null, null, null);
+                .invoke(null, ack, env, null, null, null);
         module.getMethod("ready").invoke(instance);
         module.getMethod("terminate").invoke(instance);
     }

@@ -5,12 +5,20 @@ import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRegistry;
 import eu.exeris.caps.serviceboundarycore.api.ApiSurfaceRoute;
 import eu.exeris.caps.serviceboundarycore.api.RequestFilterChain;
 import eu.exeris.caps.serviceboundarycore.api.RouteMatch;
+import eu.exeris.caps.tokenissuer.api.DevelopmentKeys;
 import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
 import eu.exeris.caps.tokenissuer.api.SigningKeyInfo;
+import eu.exeris.caps.tokenissuer.api.TokenIssueRequest;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
 import eu.exeris.caps.tokenissuer.api.exception.TokenIssuerConfigurationException;
 import eu.exeris.caps.tokenissuer.spi.ApiSurfaceRegistryRegistrar;
 import eu.exeris.caps.tokenissuer.testing.TestSupport;
+import org.jose4j.jwa.AlgorithmConstraints;
+import org.jose4j.jwk.JsonWebKeySet;
+import org.jose4j.jws.AlgorithmIdentifiers;
+import org.jose4j.jwt.JwtClaims;
+import org.jose4j.jwt.consumer.JwtConsumerBuilder;
+import org.jose4j.keys.resolvers.JwksVerificationKeyResolver;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.TransactionIsolation;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
@@ -43,6 +51,17 @@ class TokenIssuerModuleTest {
 
     private static final Map<String, String> MANUAL_ENV = Map.of(
             TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+            TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+            TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
+
+    private static final String DEV_ISSUER = "urn:exeris:test:issuer";
+
+    private static final Map<String, String> DEV_ENV = Map.of(
+            TokenIssuerConfig.ENV_ISSUER, DEV_ISSUER,
+            TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE);
+
+    private static final Map<String, String> DEV_MANUAL_ENV = Map.of(
+            TokenIssuerConfig.ENV_ISSUER, DEV_ISSUER,
             TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
             TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
 
@@ -96,7 +115,7 @@ class TokenIssuerModuleTest {
     @DisplayName("a missing issuer or audience fails construction for in-memory storage too")
     void missingIssuerFailsBoot() {
         Map<String, String> withoutIssuer = Map.of(TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE);
-        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(withoutIssuer, null, null, null))
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(DevelopmentKeys.UNSEALED_ACKNOWLEDGED, withoutIssuer, null, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo(TokenIssuerConfig.ENV_ISSUER));
@@ -189,7 +208,8 @@ class TokenIssuerModuleTest {
             }
         };
 
-        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(MANUAL_ENV, null, new ApiSurfaceRegistryRegistrar(mockRegistry), null);
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_MANUAL_ENV, null, new ApiSurfaceRegistryRegistrar(mockRegistry), null);
 
         assertThat(module.isInitialized()).isFalse();
         assertThat(module.isReady()).isFalse();
@@ -235,7 +255,8 @@ class TokenIssuerModuleTest {
     @Test
     @DisplayName("without a scheduler construction fails unless manual rotation is explicitly configured")
     void missingSchedulerFailsUnlessManual() {
-        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(ENV, null, null, null))
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_ENV, null, null, null))
                 .isInstanceOf(TokenIssuerConfigurationException.class)
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo(TokenIssuerConfig.ENV_MANUAL_ROTATION));
@@ -247,14 +268,16 @@ class TokenIssuerModuleTest {
                 .satisfies(e -> assertThat(((TokenIssuerConfigurationException) e).key())
                         .isEqualTo(TokenIssuerConfig.ENV_MANUAL_ROTATION));
 
-        assertThat(TokenIssuerModule.inMemoryForDevelopment(MANUAL_ENV, null, null, null)).isNotNull();
+        assertThat(TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_MANUAL_ENV, null, null, null)).isNotNull();
     }
 
     @Test
     @DisplayName("with a scheduler, ready submits the rotation job and drain cancels it")
     void schedulerRunsTheRotationJob() throws Exception {
         RecordingScheduler scheduler = new RecordingScheduler();
-        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(ENV, scheduler, null, null);
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_ENV, scheduler, null, null);
 
         module.ready();
         assertThat(scheduler.submitted).hasSize(1);
@@ -276,6 +299,97 @@ class TokenIssuerModuleTest {
         assertThatThrownBy(module::accessTokenIssuer).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(module::jwksPublisher).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(module::signingKeyRotation).isInstanceOf(IllegalStateException.class);
+        module.terminate();
+    }
+
+    @Test
+    @DisplayName("null acknowledgement fails with NullPointerException")
+    void nullAcknowledgementRefused() {
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(null, DEV_MANUAL_ENV, null, null, null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("non-development issuer is refused with IllegalStateException")
+    void nonDevelopmentIssuerRefused() {
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, MANUAL_ENV, null, null, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(TestSupport.ISSUER);
+
+        Map<String, String> httpsIssuer = Map.of(
+                TokenIssuerConfig.ENV_ISSUER, "https://issuer.example.com",
+                TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, httpsIssuer, null, null, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("https://issuer.example.com");
+
+        Map<String, String> localhostSubdomain = Map.of(
+                TokenIssuerConfig.ENV_ISSUER, "http://localhost.evil.com",
+                TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
+        assertThatThrownBy(() -> TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, localhostSubdomain, null, null, null))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("development issuers with urn, localhost and 127.0.0.1 are accepted")
+    void developmentIssuersAccepted() {
+        for (String issuer : List.of(
+                "urn:exeris:test:issuer",
+                "http://localhost",
+                "http://localhost:8080",
+                "https://localhost:8443/auth",
+                "http://127.0.0.1",
+                "http://127.0.0.1:8080/issuer",
+                "https://127.0.0.1:8443")) {
+            Map<String, String> env = Map.of(
+                    TokenIssuerConfig.ENV_ISSUER, issuer,
+                    TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                    TokenIssuerConfig.ENV_MANUAL_ROTATION, "true");
+            assertThat(TokenIssuerModule.inMemoryForDevelopment(
+                    DevelopmentKeys.UNSEALED_ACKNOWLEDGED, env, null, null, null)).isNotNull();
+        }
+    }
+
+    @Test
+    @DisplayName("development issuer works end to end: issue a token and verify it against jwksPublisher().getJwksJson()")
+    void developmentIssuerEndToEnd() throws Exception {
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_MANUAL_ENV, null, null, null);
+        module.ready();
+
+        UUID subject = UUID.randomUUID();
+        UUID session = UUID.randomUUID();
+        IssuedAccessToken token = module.accessTokenIssuer().issueAccessToken(
+                TokenIssueRequest.builder()
+                        .subjectId(subject)
+                        .sessionId(session)
+                        .tenantId("tenant-dev-1")
+                        .build());
+        assertThat(token).isNotNull();
+        assertThat(token.token()).isNotEmpty();
+
+        JwtClaims claims = new JwtConsumerBuilder()
+                .setVerificationKeyResolver(new JwksVerificationKeyResolver(
+                        new JsonWebKeySet(module.jwksPublisher().getJwksJson()).getJsonWebKeys()))
+                .setJwsAlgorithmConstraints(AlgorithmConstraints.ConstraintType.PERMIT, AlgorithmIdentifiers.EDDSA)
+                .setExpectedIssuer(DEV_ISSUER)
+                .setExpectedAudience(TestSupport.AUDIENCE)
+                .setRequireExpirationTime()
+                .setRequireNotBefore()
+                .build()
+                .processToClaims(token.token());
+
+        assertThat(claims.getSubject()).isEqualTo(subject.toString());
+        assertThat(claims.getStringClaimValue("sid")).isEqualTo(session.toString());
+        assertThat(claims.getStringClaimValue("tid")).isEqualTo("tenant-dev-1");
+        assertThat(claims.getIssuer()).isEqualTo(DEV_ISSUER);
+        assertThat(claims.getAudience()).containsExactly(TestSupport.AUDIENCE);
+
         module.terminate();
     }
 }
