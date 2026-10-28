@@ -18,24 +18,7 @@ tracking issue in the `0.1.0` milestone and is linked here; a later gap is recor
 
 ## Before 0.1.0
 
-### A compromised key cannot be withdrawn quickly
-
-No operation withdraws a key. `SigningKeyRotation.rotateKeys()` publishes a successor that signs only
-after it has been published for `JWKS_MAX_AGE` (default five minutes), so the compromised key keeps
-signing for that long, and the replaced key then stays in the JWKS until `MAX_TOKEN_TTL + CLOCK_SKEW` (default 61 minutes) has passed. Setting a key to `RETIRED` is possible only through the
-internal repository, and the README has no operator procedure for this case. Code in
-`DefaultSigningKeyRotation.java` and
-`api/SigningKeyRotation.java`. Tracking issue:
-[#14](https://github.com/exeris-systems/exeris-caps-token-issuer/issues/14).
-
-### KEK rotation needs an internal class
-
-The README procedure for replacing the key-encryption key calls
-`PostgresSigningKeyRepository.resealWithActiveKek()`, a method of an `internal` type the module does
-not expose. A consumer that stays on the public surface cannot follow it. The fix is a public
-operation that re-seals stored keys under the active KEK and is audited. Code:
-`internal/repository/PostgresSigningKeyRepository.java`.
-Tracking issue: [#15](https://github.com/exeris-systems/exeris-caps-token-issuer/issues/15).
+All gaps tracked for the `0.1.0` milestone have closed.
 
 ## Later
 

@@ -38,6 +38,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -208,19 +209,42 @@ class PostgresSigningKeyRepositoryIT {
     void kekRotationAndReseal() {
         String oldKek = TestSupport.newKek();
         String newKek = TestSupport.newKek();
-        MutableClock clock = new MutableClock(Instant.parse("2026-02-01T00:00:00Z"));
-        PostgresSigningKeyRepository underOld = new PostgresSigningKeyRepository(tx, ring("old:" + oldKek));
-        DefaultSigningKeyRotation rotation = new DefaultSigningKeyRotation(underOld, TestSupport.config(), null, null, clock);
-        rotation.ensureActiveKey();
-        rotation.rotateKeys();
 
-        PostgresSigningKeyRepository both = new PostgresSigningKeyRepository(tx, ring("new:" + newKek + ",old:" + oldKek));
-        assertThat(both.findAllInfo()).hasSize(2);
-        assertThat(both.resealWithActiveKek()).isEqualTo(2);
-        assertThat(both.resealWithActiveKek()).isZero();
+        Map<String, String> oldEnv = Map.of(
+                TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+                TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
+                KeyEncryptionKeyring.ENV_KEKS, "old:" + oldKek
+        );
+        TokenIssuerModule moduleOld = new TokenIssuerModule(oldEnv, tx, null, null, null);
+        moduleOld.signingKeyRotation().rotateIfDue();
+        moduleOld.signingKeyRotation().rotateKeys();
 
-        PostgresSigningKeyRepository onlyNew = new PostgresSigningKeyRepository(tx, ring("new:" + newKek));
-        assertThat(onlyNew.findAllInfo()).hasSize(2);
+        List<String> auditEvents = new ArrayList<>();
+        Map<String, String> bothEnv = Map.of(
+                TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+                TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
+                KeyEncryptionKeyring.ENV_KEKS, "new:" + newKek + ",old:" + oldKek
+        );
+        TokenIssuerModule moduleBoth = new TokenIssuerModule(bothEnv, tx, null, null,
+                (action, type, id, actor, details, at) -> auditEvents.add(action));
+
+        assertThat(moduleBoth.signingKeyRotation().listKeyGenerations()).hasSize(2);
+        assertThat(moduleBoth.resealWithActiveKek()).isEqualTo(2);
+        assertThat(auditEvents).contains("kek.resealed");
+        assertThat(moduleBoth.resealWithActiveKek()).isZero();
+
+        Map<String, String> newEnv = Map.of(
+                TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+                TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
+                KeyEncryptionKeyring.ENV_KEKS, "new:" + newKek
+        );
+        TokenIssuerModule moduleNew = new TokenIssuerModule(newEnv, tx, null, null, null);
+        assertThat(moduleNew.signingKeyRotation().listKeyGenerations()).hasSize(2);
+        assertThat(moduleNew.accessTokenIssuer().issueAccessToken(UUID.randomUUID(), null)).isNotNull();
+        assertThat(moduleNew.signingKeyRotation().resealWithActiveKek()).isZero();
     }
 
     @Test

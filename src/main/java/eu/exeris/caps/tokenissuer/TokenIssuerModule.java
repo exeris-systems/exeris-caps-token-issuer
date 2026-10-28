@@ -268,6 +268,32 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
         return requireWired(signingKeyRotation);
     }
 
+    /**
+     * Withdraws a named signing key immediately, whatever its current lifecycle state.
+     *
+     * @param kid identifier of the key to withdraw; non-null
+     * @throws IllegalStateException on a lifecycle-only instance
+     * @throws IllegalArgumentException if no key with the given identifier exists
+     */
+    public void withdrawKey(String kid) {
+        requireWired(signingKeyRotation).withdrawKey(kid);
+    }
+
+    /**
+     * Re-seals every stored signing key record under the currently active key-encryption key (KEK).
+     *
+     * <p>Used during KEK rotation: after prepending a new KEK to the configured keyring,
+     * calling this operation re-encrypts all stored private keys under the new active KEK.
+     * Once all keys are re-sealed under the active KEK, the superseded KEK can be removed
+     * from configuration.
+     *
+     * @return number of keys re-sealed under the active KEK
+     * @throws IllegalStateException on a lifecycle-only instance
+     */
+    public int resealWithActiveKek() {
+        return requireWired(signingKeyRotation).resealWithActiveKek();
+    }
+
     private static <T> T requireWired(T service) {
         if (service == null) {
             throw new IllegalStateException("lifecycle-only instance: build the module with its wiring constructor to obtain services");
