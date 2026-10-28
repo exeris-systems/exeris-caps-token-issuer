@@ -49,6 +49,10 @@ public final class TokenIssuerAuditBridge {
         emit("key.retired", "signing-key", kid, "system", Map.of("kid", kid));
     }
 
+    public void logKeyWithdrawn(String kid) {
+        emit("key.withdrawn", "signing-key", kid, "system", Map.of("kid", kid));
+    }
+
     public void logTokenIssued(UUID subjectId, UUID sessionId, String jti, String kid) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("kid", kid);

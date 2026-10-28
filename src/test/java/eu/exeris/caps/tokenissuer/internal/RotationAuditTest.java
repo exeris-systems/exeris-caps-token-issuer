@@ -82,4 +82,17 @@ class RotationAuditTest {
 
         assertThat(events).isEmpty();
     }
+
+    @Test
+    void withdrawalEmitsAuditEventAfterClusterLockIsReleased() {
+        SigningKeyRepository repo = transactionalRepository();
+        DefaultSigningKeyRotation rotation = rotation(repo, new MutableClock(T0));
+
+        SigningKeyInfo key = rotation.ensureActiveKey();
+        events.clear();
+
+        rotation.withdrawKey(key.kid());
+
+        assertThat(events).contains("key.withdrawn");
+    }
 }

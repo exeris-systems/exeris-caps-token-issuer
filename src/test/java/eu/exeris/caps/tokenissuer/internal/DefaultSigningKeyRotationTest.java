@@ -211,4 +211,77 @@ class DefaultSigningKeyRotationTest {
         TestSupport.rotateAndActivate(rotation, clock, config);
         assertThat(inState(KeyState.ACTIVE)).hasSize(1);
     }
+
+    @Test
+    @DisplayName("withdrawing the active key leaves issuance failing closed when no replacement is ready")
+    void withdrawActiveKeyWithNoSuccessorFailsClosed() {
+        SigningKeyInfo first = rotation.ensureActiveKey();
+        rotation.withdrawKey(first.kid());
+
+        assertThat(stateOf(first.kid()).state()).isEqualTo(KeyState.RETIRED);
+        assertThat(stateOf(first.kid()).retiredAt()).isEqualTo(clock.instant());
+        assertThat(publishedKids()).doesNotContain(first.kid());
+        assertThatThrownBy(rotation::activeKey).isInstanceOf(NoActiveKeyException.class);
+        assertThatThrownBy(rotation::rotateIfDue).isInstanceOf(NoActiveKeyException.class);
+
+        SigningKeyInfo pending = inState(KeyState.PENDING).getFirst();
+        assertThat(publishedKids()).containsExactly(pending.kid());
+
+        clock.advance(config.jwksMaxAge());
+        SigningKeyInfo second = rotation.rotateIfDue();
+        assertThat(second.kid()).isEqualTo(pending.kid());
+        assertThat(second.state()).isEqualTo(KeyState.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("withdrawing the active key activates a replacement that is already published")
+    void withdrawActiveKeyWithReadySuccessorActivatesImmediately() {
+        SigningKeyInfo first = rotation.ensureActiveKey();
+        SigningKeyInfo pending = rotation.rotateKeys();
+        clock.advance(config.jwksMaxAge());
+
+        rotation.withdrawKey(first.kid());
+
+        assertThat(stateOf(first.kid()).state()).isEqualTo(KeyState.RETIRED);
+        assertThat(publishedKids()).containsExactly(pending.kid());
+        assertThat(rotation.activeKey().kid()).isEqualTo(pending.kid());
+    }
+
+    @Test
+    @DisplayName("withdrawing a pending key removes it from the JWKS and it never activates")
+    void withdrawPendingKeyRemovesFromJwks() {
+        SigningKeyInfo first = rotation.ensureActiveKey();
+        SigningKeyInfo pending = rotation.rotateKeys();
+        assertThat(publishedKids()).contains(pending.kid());
+
+        rotation.withdrawKey(pending.kid());
+
+        assertThat(stateOf(pending.kid()).state()).isEqualTo(KeyState.RETIRED);
+        assertThat(publishedKids()).containsExactly(first.kid());
+
+        clock.advance(config.jwksMaxAge());
+        assertThat(rotation.rotateIfDue().kid()).isEqualTo(first.kid());
+    }
+
+    @Test
+    @DisplayName("withdrawing a retiring key removes it from the JWKS immediately, ending overlap")
+    void withdrawRetiringKeyEndsOverlapImmediately() {
+        SigningKeyInfo first = rotation.ensureActiveKey();
+        SigningKeyInfo second = TestSupport.rotateAndActivate(rotation, clock, config);
+        assertThat(publishedKids()).containsExactlyInAnyOrder(first.kid(), second.kid());
+
+        rotation.withdrawKey(first.kid());
+
+        assertThat(stateOf(first.kid()).state()).isEqualTo(KeyState.RETIRED);
+        assertThat(publishedKids()).containsExactly(second.kid());
+    }
+
+    @Test
+    @DisplayName("withdrawing an unknown key throws IllegalArgumentException")
+    void withdrawUnknownKeyThrows() {
+        rotation.ensureActiveKey();
+        assertThatThrownBy(() -> rotation.withdrawKey("k-unknown"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("k-unknown");
+    }
 }

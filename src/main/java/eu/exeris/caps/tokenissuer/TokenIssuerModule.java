@@ -268,6 +268,17 @@ public final class TokenIssuerModule implements CapabilityLifecycleHooks {
         return requireWired(signingKeyRotation);
     }
 
+    /**
+     * Withdraws a named signing key immediately, whatever its current lifecycle state.
+     *
+     * @param kid identifier of the key to withdraw; non-null
+     * @throws IllegalStateException on a lifecycle-only instance
+     * @throws IllegalArgumentException if no key with the given identifier exists
+     */
+    public void withdrawKey(String kid) {
+        requireWired(signingKeyRotation).withdrawKey(kid);
+    }
+
     private static <T> T requireWired(T service) {
         if (service == null) {
             throw new IllegalStateException("lifecycle-only instance: build the module with its wiring constructor to obtain services");

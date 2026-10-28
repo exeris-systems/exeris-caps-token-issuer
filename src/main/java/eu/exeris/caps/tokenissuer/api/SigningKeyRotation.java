@@ -63,4 +63,21 @@ public interface SigningKeyRotation {
      * @throws eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException if no active key exists
      */
     SigningKeyInfo activeKey();
+
+    /**
+     * Withdraws a named signing key immediately, whatever its current lifecycle state.
+     *
+     * <p>The key is transitioned to {@link KeyState#RETIRED} and removed from the JWKS at once,
+     * ensuring it never signs new tokens and live tokens signed by it are rejected by verifiers
+     * once they refetch the JWKS.
+     *
+     * <p>If the withdrawn key was {@link KeyState#ACTIVE}, this operation either activates an existing
+     * replacement key that has already been published for at least the JWKS cache lifetime, or leaves
+     * the issuer with no active key so that issuance fails closed with
+     * {@link eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException}.
+     *
+     * @param kid identifier of the key to withdraw; non-null
+     * @throws IllegalArgumentException if no key with the given identifier exists
+     */
+    void withdrawKey(String kid);
 }

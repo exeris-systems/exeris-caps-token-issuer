@@ -132,7 +132,7 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
             // Raised after the cluster lock is released: throwing inside it would roll back the
             // pending key that was just stored, and it would never mature.
             throw new NoActiveKeyException("No unexpired active signing key: the next key " + result.kid()
-                    + " is published and becomes active at " + activationInstant(result));
+                    + " is published and becomes active at " + activationInstant(result, false));
         }
         return result;
     }
@@ -142,13 +142,72 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         return advance(true);
     }
 
+    @Override
+    public void withdrawKey(String kid) {
+        Objects.requireNonNull(kid, "kid must not be null");
+        List<Runnable> auditEvents = new ArrayList<>();
+        repository.rotateUnderClusterLock(() -> {
+            auditEvents.clear();
+            synchronized (rotationMonitor) {
+                try {
+                    withdrawLocked(kid, auditEvents);
+                    return null;
+                } catch (TokenIssuerException | IllegalArgumentException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    throw new KeyRotationException("Failed to withdraw signing key " + kid, e);
+                }
+            }
+        });
+        auditEvents.forEach(Runnable::run);
+    }
+
+    private void withdrawLocked(String kid, List<Runnable> auditEvents) {
+        Instant now = clock.instant();
+        List<SigningKeyInfo> all = repository.findAllInfo();
+        SigningKeyInfo target = all.stream().filter(k -> k.kid().equals(kid)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown signing key: " + kid));
+
+        Instant retiredAt = target.retiredAt() != null && target.retiredAt().isBefore(now) ? target.retiredAt() : now;
+        repository.updateState(kid, KeyState.RETIRED, retiredAt);
+        if (auditBridge != null) {
+            auditEvents.add(() -> auditBridge.logKeyWithdrawn(kid));
+        }
+
+        if (target.state() == KeyState.ACTIVE) {
+            List<SigningKeyInfo> pending = all.stream()
+                    .filter(k -> k.state() == KeyState.PENDING && !k.kid().equals(kid))
+                    .toList();
+            SigningKeyInfo ready = retireExpiredPendingAndFindReady(pending, now, false);
+            if (ready != null) {
+                retireSurplusPending(pending, ready, now);
+                repository.updateState(ready.kid(), KeyState.ACTIVE, null);
+                if (auditBridge != null) {
+                    auditEvents.add(() -> auditBridge.logKeyRotated(ready.kid(), kid));
+                }
+            } else {
+                List<SigningKeyInfo> waiting = pending.stream().filter(k -> now.isBefore(k.expiresAt())).toList();
+                if (waiting.isEmpty()) {
+                    createPendingKey(now, auditEvents);
+                }
+            }
+        }
+    }
+
     /**
      * The instant a pending key may start to sign: the later of its planned activation (its expiry
      * minus one signing period) and the end of the JWKS cache lifetime after its publication.
      */
     private Instant activationInstant(SigningKeyInfo pending) {
-        Instant planned = pending.expiresAt().minus(config.keyTtl());
+        return activationInstant(pending, false);
+    }
+
+    private Instant activationInstant(SigningKeyInfo pending, boolean hasValidActiveKey) {
         Instant published = pending.createdAt().plus(config.jwksMaxAge());
+        if (!hasValidActiveKey) {
+            return published;
+        }
+        Instant planned = pending.expiresAt().minus(config.keyTtl());
         return planned.isAfter(published) ? planned : published;
     }
 
@@ -196,7 +255,8 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         SigningKeyInfo active = all.stream().filter(k -> k.state() == KeyState.ACTIVE).findFirst().orElse(null);
         List<SigningKeyInfo> pending = all.stream().filter(k -> k.state() == KeyState.PENDING).toList();
 
-        SigningKeyInfo ready = retireExpiredPendingAndFindReady(pending, now);
+        boolean hasValidActiveKey = active != null && now.isBefore(active.expiresAt());
+        SigningKeyInfo ready = retireExpiredPendingAndFindReady(pending, now, hasValidActiveKey);
         if (ready != null) {
             retireSurplusPending(pending, ready, now);
             return promote(ready, all, now, auditEvents);
@@ -205,7 +265,7 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         List<SigningKeyInfo> waiting = pending.stream().filter(k -> now.isBefore(k.expiresAt())).toList();
         if (active == null) {
             return waiting.isEmpty()
-                    ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()), auditEvents)
+                    ? (all.isEmpty() ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()), auditEvents) : createPendingKey(now, auditEvents))
                     : waiting.get(0);
         }
         if (now.isBefore(active.expiresAt())) {
@@ -218,12 +278,12 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
      * Retires every pending key that expired before it could activate and returns the first remaining
      * one whose activation instant has passed, or {@code null} when none is ready.
      */
-    private SigningKeyInfo retireExpiredPendingAndFindReady(List<SigningKeyInfo> pending, Instant now) {
+    private SigningKeyInfo retireExpiredPendingAndFindReady(List<SigningKeyInfo> pending, Instant now, boolean hasValidActiveKey) {
         SigningKeyInfo ready = null;
         for (SigningKeyInfo candidate : pending) {
             if (!now.isBefore(candidate.expiresAt())) {
                 repository.updateState(candidate.kid(), KeyState.RETIRED, now);
-            } else if (ready == null && !now.isBefore(activationInstant(candidate))) {
+            } else if (ready == null && !now.isBefore(activationInstant(candidate, hasValidActiveKey))) {
                 ready = candidate;
             }
         }

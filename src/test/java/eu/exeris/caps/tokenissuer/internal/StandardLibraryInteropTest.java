@@ -3,6 +3,7 @@ package eu.exeris.caps.tokenissuer.internal;
 import eu.exeris.caps.tokenissuer.api.IssuedAccessToken;
 import eu.exeris.caps.tokenissuer.api.TokenIssueRequest;
 import eu.exeris.caps.tokenissuer.api.TokenIssuerConfig;
+import eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException;
 import eu.exeris.caps.tokenissuer.internal.repository.InMemorySigningKeyRepository;
 import eu.exeris.caps.tokenissuer.testing.TestSupport;
 import eu.exeris.caps.tokenissuer.testing.TestSupport.MutableClock;
@@ -110,5 +111,65 @@ class StandardLibraryInteropTest {
                 .setEvaluationTime(NumericDate.fromMilliseconds(clock.millis()))
                 .build();
         assertThatThrownBy(() -> otherAudience.processToClaims(token.token())).isInstanceOf(InvalidJwtException.class);
+    }
+
+    @Test
+    @DisplayName("a token of a withdrawn key fails once the verifier has refetched the JWKS")
+    void tokenOfWithdrawnKeyFailsOnceJwksRefetched() throws Exception {
+        String activeKid = rotation.activeKey().kid();
+        IssuedAccessToken token = issuer.issueAccessToken(UUID.randomUUID(), null);
+
+        // Verifier with current JWKS verifies the token
+        assertThat(consumer(jwks.getJwksJson()).processToClaims(token.token())).isNotNull();
+
+        // Withdraw the active key
+        rotation.withdrawKey(activeKid);
+
+        // Verifier refetches JWKS: the withdrawn key is gone
+        String refetchedJwks = jwks.getJwksJson();
+        assertThat(new JsonWebKeySet(refetchedJwks).getJsonWebKeys())
+                .noneMatch(k -> k.getKeyId().equals(activeKid));
+
+        // Refetched verifier rejects the token
+        assertThatThrownBy(() -> consumer(refetchedJwks).processToClaims(token.token()))
+                .isInstanceOf(InvalidJwtException.class);
+
+        // Issuance fails closed with NoActiveKeyException because no successor has matured
+        assertThatThrownBy(() -> issuer.issueAccessToken(UUID.randomUUID(), null))
+                .isInstanceOf(NoActiveKeyException.class);
+
+        // Advance clock by JWKS_MAX_AGE: the pending key matures and becomes active
+        clock.advance(config.jwksMaxAge());
+        rotation.rotateIfDue();
+        IssuedAccessToken newToken = issuer.issueAccessToken(UUID.randomUUID(), null);
+        assertThat(consumer(jwks.getJwksJson()).processToClaims(newToken.token())).isNotNull();
+    }
+
+    @Test
+    @DisplayName("withdrawing the active key activates a replacement that is already published")
+    void withdrawingActiveKeyActivatesAlreadyPublishedReplacement() throws Exception {
+        String firstKid = rotation.activeKey().kid();
+        IssuedAccessToken firstToken = issuer.issueAccessToken(UUID.randomUUID(), null);
+
+        // Publish a successor and let it mature for JWKS_MAX_AGE
+        rotation.rotateKeys();
+        clock.advance(config.jwksMaxAge());
+
+        // Withdraw the first active key
+        rotation.withdrawKey(firstKid);
+
+        // The mature successor is activated immediately
+        String secondKid = rotation.activeKey().kid();
+        assertThat(secondKid).isNotEqualTo(firstKid);
+
+        // Issuance succeeds immediately with the replacement key
+        IssuedAccessToken secondToken = issuer.issueAccessToken(UUID.randomUUID(), null);
+
+        String refetchedJwks = jwks.getJwksJson();
+        assertThat(consumer(refetchedJwks).processToClaims(secondToken.token())).isNotNull();
+
+        // Token of the withdrawn key fails against refetched JWKS
+        assertThatThrownBy(() -> consumer(refetchedJwks).processToClaims(firstToken.token()))
+                .isInstanceOf(InvalidJwtException.class);
     }
 }

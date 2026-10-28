@@ -37,8 +37,9 @@ class TokenIssuerAuditBridgeTest {
         issuer.issueAccessToken(UUID.randomUUID(), null);
         clock.advance(Duration.ofDays(1));
         bridge.logKeyRetired("k-x");
+        bridge.logKeyWithdrawn("k-w");
 
-        assertThat(events).extracting(Recorded::action).contains("key.generated", "token.issued", "key.retired");
+        assertThat(events).extracting(Recorded::action).contains("key.generated", "token.issued", "key.retired", "key.withdrawn");
         assertThat(events.get(0).at()).isEqualTo(Instant.parse("2001-02-03T04:05:06Z"));
         assertThat(events.get(events.size() - 1).at()).isEqualTo(Instant.parse("2001-02-04T04:05:06Z"));
         assertThat(events).extracting(Recorded::at).doesNotContain(Instant.now());
