@@ -83,5 +83,23 @@ public interface SigningKeyRepository {
     default SigningKeyInfo rotateUnderClusterLock(Supplier<SigningKeyInfo> rotationLogic) {
         return rotationLogic.get();
     }
+
+    /**
+     * Re-seals every stored private key whose envelope names a KEK other than the active one.
+     *
+     * @return number of records re-sealed
+     */
+    default int resealWithActiveKek() {
+        return 0;
+    }
+
+    /**
+     * Returns the identifier of the active key-encryption key, or {@code null} when keys are unsealed.
+     *
+     * @return active KEK identifier, or {@code null}
+     */
+    default String activeKekId() {
+        return null;
+    }
 }
 

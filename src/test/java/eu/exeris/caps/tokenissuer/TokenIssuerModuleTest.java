@@ -300,7 +300,17 @@ class TokenIssuerModuleTest {
         assertThatThrownBy(module::jwksPublisher).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(module::signingKeyRotation).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> module.withdrawKey("k-1")).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(module::resealWithActiveKek).isInstanceOf(IllegalStateException.class);
         module.terminate();
+    }
+
+    @Test
+    @DisplayName("module resealWithActiveKek returns zero for in-memory development keys")
+    void moduleResealWithActiveKekInMemory() {
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_MANUAL_ENV, null, null, null);
+        assertThat(module.resealWithActiveKek()).isZero();
+        assertThat(module.signingKeyRotation().resealWithActiveKek()).isZero();
     }
 
     @Test

@@ -45,6 +45,12 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
      *
      * @return number of records re-sealed
      */
+    @Override
+    public String activeKekId() {
+        return envelope.activeKekId();
+    }
+
+    @Override
     public int resealWithActiveKek() {
         AtomicInteger count = new AtomicInteger();
         rotateUnderClusterLock(() -> {

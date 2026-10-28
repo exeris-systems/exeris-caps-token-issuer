@@ -53,6 +53,15 @@ public final class TokenIssuerAuditBridge {
         emit("key.withdrawn", "signing-key", kid, "system", Map.of("kid", kid));
     }
 
+    public void logKekResealed(int count, String activeKekId) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("resealedCount", count);
+        if (activeKekId != null) {
+            details.put("activeKekId", activeKekId);
+        }
+        emit("kek.resealed", "key-encryption-key", activeKekId != null ? activeKekId : "active", "system", details);
+    }
+
     public void logTokenIssued(UUID subjectId, UUID sessionId, String jti, String kid) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("kid", kid);

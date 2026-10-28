@@ -18,14 +18,7 @@ tracking issue in the `0.1.0` milestone and is linked here; a later gap is recor
 
 ## Before 0.1.0
 
-### KEK rotation needs an internal class
-
-The README procedure for replacing the key-encryption key calls
-`PostgresSigningKeyRepository.resealWithActiveKek()`, a method of an `internal` type the module does
-not expose. A consumer that stays on the public surface cannot follow it. The fix is a public
-operation that re-seals stored keys under the active KEK and is audited. Code:
-`internal/repository/PostgresSigningKeyRepository.java`.
-Tracking issue: [#15](https://github.com/exeris-systems/exeris-caps-token-issuer/issues/15).
+All gaps tracked for the `0.1.0` milestone have closed.
 
 ## Later
 

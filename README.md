@@ -41,7 +41,7 @@ The module reads its configuration from the environment when it is constructed. 
 | `EXERIS_TOKEN_ISSUER_KEKS` | with the wired constructor, unless the file key is set | – | key-encryption keyring, `<id>:<base64>[,<id>:<base64>…]` |
 | `EXERIS_TOKEN_ISSUER_KEKS_FILE` | with the wired constructor, unless the inline key is set | – | path to a file holding the same keyring, such as a mounted secret |
 
-Durations are ISO-8601. Set exactly one of the two keyring keys. Each KEK must decode to 32 random bytes, for example from `openssl rand -base64 32`; a passphrase is refused, not hashed into a key. The first entry seals new keys, and the later entries only open existing ones. To rotate a KEK, prepend the new entry and call `PostgresSigningKeyRepository.resealWithActiveKek()`, then remove the old entry. A stored key that is not sealed, names an unknown KEK, or fails authentication throws `SigningKeyCustodyException`; nothing falls back to plaintext.
+Durations are ISO-8601. Set exactly one of the two keyring keys. Each KEK must decode to 32 random bytes, for example from `openssl rand -base64 32`; a passphrase is refused, not hashed into a key. The first entry seals new keys, and the later entries only open existing ones. To rotate a KEK, prepend the new entry and call `TokenIssuerModule.resealWithActiveKek()` (or `SigningKeyRotation.resealWithActiveKek()`), then remove the old entry. A stored key that is not sealed, names an unknown KEK, or fails authentication throws `SigningKeyCustodyException`; nothing falls back to plaintext.
 
 ## Build & test
 

@@ -38,8 +38,9 @@ class TokenIssuerAuditBridgeTest {
         clock.advance(Duration.ofDays(1));
         bridge.logKeyRetired("k-x");
         bridge.logKeyWithdrawn("k-w");
+        bridge.logKekResealed(2, "kek-active");
 
-        assertThat(events).extracting(Recorded::action).contains("key.generated", "token.issued", "key.retired", "key.withdrawn");
+        assertThat(events).extracting(Recorded::action).contains("key.generated", "token.issued", "key.retired", "key.withdrawn", "kek.resealed");
         assertThat(events.get(0).at()).isEqualTo(Instant.parse("2001-02-03T04:05:06Z"));
         assertThat(events.get(events.size() - 1).at()).isEqualTo(Instant.parse("2001-02-04T04:05:06Z"));
         assertThat(events).extracting(Recorded::at).doesNotContain(Instant.now());

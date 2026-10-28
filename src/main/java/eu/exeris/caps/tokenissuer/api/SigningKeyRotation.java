@@ -80,4 +80,16 @@ public interface SigningKeyRotation {
      * @throws IllegalArgumentException if no key with the given identifier exists
      */
     void withdrawKey(String kid);
+
+    /**
+     * Re-seals every stored signing key record under the currently active key-encryption key (KEK).
+     *
+     * <p>Used during KEK rotation: after prepending a new KEK to the configured keyring,
+     * calling this operation re-encrypts all stored private keys under the new active KEK.
+     * Once all keys are re-sealed under the active KEK, the superseded KEK can be removed
+     * from configuration.
+     *
+     * @return number of keys re-sealed under the active KEK
+     */
+    int resealWithActiveKek();
 }

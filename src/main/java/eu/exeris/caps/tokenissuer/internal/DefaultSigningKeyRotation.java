@@ -396,4 +396,13 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
                 .findFirst()
                 .orElseThrow(() -> new NoActiveKeyException("No active signing key available"));
     }
+
+    @Override
+    public int resealWithActiveKek() {
+        int count = repository.resealWithActiveKek();
+        if (auditBridge != null) {
+            auditBridge.logKekResealed(count, repository.activeKekId());
+        }
+        return count;
+    }
 }
