@@ -2,7 +2,7 @@
 
 Access-token issuance as an Exeris capability. It provides `AccessTokenIssuer` (short-lived JWT access tokens signed with EdDSA over Ed25519), `JwksPublisher` (a JWKS document with the pending, active and retiring public keys, optionally registered as a route on `service-boundary-core`'s `ApiSurfaceRegistry` through `spi.ApiSurfaceRegistryRegistrar`) and `SigningKeyRotation` (key generations, an overlap window and retirement).
 
-Status: proof of concept, built against `exeris-kernel` 0.12.0. The API is not stable and no artefact has been published.
+Status: proof of concept, built against `exeris-kernel` 0.13.0. The API is not stable and no artefact has been published.
 
 ## Where it sits
 
@@ -55,7 +55,7 @@ mvn verify                               # pass 2 — generate cap-manifest.json
 
 Both passes are needed after a `clean`: `exeris:generate` runs before `compile`, and `compile` is when the processor writes the metadata it reads. `src/main/generated/java/cap-manifest.json` is committed, so a clean `git status` after `mvn verify` shows the manifest matches the declaration.
 
-`exeris-sdk` 0.12.0 and `exeris-tooling` 0.10.0 resolve from Maven Central, and `exeris-kernel` 0.12.0 is resolved from GitHub Packages, which needs a token with `read:packages`; the sibling `exeris-caps-service-boundary-core` and `exeris-caps-audit-trail` are built from source first. [`.github/workflows/build.yml`](.github/workflows/build.yml) is the exact sequence, and [`.github/maven-settings.xml`](.github/maven-settings.xml) the repository configuration it uses.
+`exeris-sdk` 0.12.0 and `exeris-tooling` 0.10.0 resolve from Maven Central, and `exeris-kernel` 0.13.0 is resolved from GitHub Packages, which needs a token with `read:packages`; the sibling `exeris-caps-service-boundary-core` and `exeris-caps-audit-trail` are built from source first. [`.github/workflows/build.yml`](.github/workflows/build.yml) is the exact sequence, and [`.github/maven-settings.xml`](.github/maven-settings.xml) the repository configuration it uses.
 
 ## Documentation
 
