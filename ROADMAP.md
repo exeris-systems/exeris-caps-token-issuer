@@ -4,7 +4,7 @@ type: roadmap
 visibility: public
 owning-repo: exeris-caps-token-issuer
 status: active
-last-verified: 2026-10-15
+last-verified: 2026-11-10
 ---
 
 # `exeris-caps-token-issuer` roadmap
@@ -51,8 +51,9 @@ against it. Code: `internal/repository/PostgresSigningKeyRepository.java`,
 
 `DefaultAccessTokenIssuer` reads the active row, unseals the private key and rebuilds the `PrivateKey`
 for each token. There is no key cache. That costs an AES-GCM open, a database read and a key parse per
-token, and it bounds issuance throughput. A cache has to be dropped at rotation and withdrawal, so it
-waits on the withdrawal operation of the `0.1.0` milestone. Code:
+token, and it bounds issuance throughput. A cache has to be dropped at rotation, at withdrawal
+(`SigningKeyRotation.withdrawKey`) and at KEK re-sealing, so it has to be designed against those
+three operations. Code:
 `internal/DefaultAccessTokenIssuer.java`,
 `internal/repository/PostgresSigningKeyRepository.java`.
 
