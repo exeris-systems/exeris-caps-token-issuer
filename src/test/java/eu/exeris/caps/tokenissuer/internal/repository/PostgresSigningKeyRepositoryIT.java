@@ -248,6 +248,25 @@ class PostgresSigningKeyRepositoryIT {
     }
 
     @Test
+    @DisplayName("withdrawing an unknown kid surfaces IllegalArgumentException, unwrapped, and leaves the keys untouched")
+    void withdrawUnknownKidSurfacesDocumentedException() {
+        Map<String, String> env = Map.of(
+                TokenIssuerConfig.ENV_ISSUER, TestSupport.ISSUER,
+                TokenIssuerConfig.ENV_AUDIENCE, TestSupport.AUDIENCE,
+                TokenIssuerConfig.ENV_MANUAL_ROTATION, "true",
+                KeyEncryptionKeyring.ENV_KEKS, "primary:" + TestSupport.newKek()
+        );
+        TokenIssuerModule module = new TokenIssuerModule(env, tx, null, null, null);
+        SigningKeyInfo active = module.signingKeyRotation().rotateIfDue();
+
+        assertThatThrownBy(() -> module.signingKeyRotation().withdrawKey("k-unknown"))
+                .isExactlyInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("k-unknown");
+
+        assertThat(module.signingKeyRotation().activeKey().kid()).isEqualTo(active.kid());
+    }
+
+    @Test
     @DisplayName("rotation overlap holds through PostgreSQL: the old key is published until maxTokenTtl + clockSkew")
     void rotationOverlapInPostgres() {
         MutableClock clock = new MutableClock(Instant.parse("2026-02-01T00:00:00Z"));
