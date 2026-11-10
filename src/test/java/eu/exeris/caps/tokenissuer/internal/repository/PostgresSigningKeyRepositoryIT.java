@@ -30,9 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -78,9 +77,14 @@ class PostgresSigningKeyRepositoryIT {
             container.start();
             tx = new JdbcTransactionalExecutor(container.getJdbcUrl(), container.getUsername(), container.getPassword());
         }
-        String ddl = Files.readString(Path.of("src/main/resources/schema/token-issuer-schema.sql"), StandardCharsets.UTF_8);
-        try (Connection c = tx.open(); Statement s = c.createStatement()) {
-            s.execute(ddl);
+        for (String migration : TokenIssuerModule.MIGRATIONS) {
+            try (InputStream in = TokenIssuerModule.class.getClassLoader().getResourceAsStream(migration)) {
+                assertThat(in).as(migration).isNotNull();
+                String ddl = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                try (Connection c = tx.open(); Statement s = c.createStatement()) {
+                    s.execute(ddl);
+                }
+            }
         }
     }
 

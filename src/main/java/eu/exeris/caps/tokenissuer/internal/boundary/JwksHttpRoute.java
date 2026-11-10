@@ -7,6 +7,7 @@ import eu.exeris.kernel.spi.http.HttpHeader;
 import eu.exeris.kernel.spi.http.HttpMethod;
 import eu.exeris.kernel.spi.http.HttpResponse;
 import eu.exeris.kernel.spi.http.HttpStatus;
+import eu.exeris.kernel.spi.http.RouteRequirement;
 
 import java.time.Duration;
 import java.util.List;
@@ -42,13 +43,18 @@ public final class JwksHttpRoute implements HttpHandler {
         this.cacheControl = "public, max-age=" + maxAge.getSeconds();
     }
 
+    /**
+     * Creates the route declared public: the JWKS document carries public key material only, so the
+     * route states {@link RouteRequirement#permitAll()} explicitly and is accepted by a registry that
+     * refuses routes without a requirement.
+     */
     public static ApiSurfaceRoute createRoute(Supplier<String> jwksJsonSupplier, Duration maxAge) {
         JwksHttpRoute handler = new JwksHttpRoute(jwksJsonSupplier, maxAge);
         return new ApiSurfaceRoute(
                 HttpMethod.GET,
                 PATH,
                 ACTION_NAME,
-                List.of(),
+                List.of(RouteRequirement.permitAll()),
                 handler
         );
     }

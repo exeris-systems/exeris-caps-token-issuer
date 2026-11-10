@@ -59,10 +59,10 @@ three operations. Code:
 
 ### Nothing applies the schema
 
-The DDL lives in `src/main/resources/schema/token-issuer-schema.sql` and nothing runs it or checks the
-table at boot, so a missing table surfaces at the first key read. The capability has no migration mechanism
-and no schema version. This waits on a decision, for the capability family, about who owns schema
-creation: the capability, the SKU or the operator.
+The DDL ships as `db/migration/exeris-caps-token-issuer/V1__create_token_issuer.sql`, listed by
+`TokenIssuerModule.MIGRATIONS`. The capability applies nothing and checks no table at boot, so a missing
+table surfaces at the first key read. It has no schema version of its own; the composing SKU owns running
+the migrations.
 
 ### No published artefact and no compatibility gate
 

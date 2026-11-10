@@ -416,4 +416,11 @@ class TokenIssuerModuleTest {
 
         module.terminate();
     }
+
+    @Test
+    @DisplayName("the migrations it names are on the classpath, in order")
+    void migrationsArePackaged() {
+        assertThat(TokenIssuerModule.MIGRATIONS).isNotEmpty().isSorted().allSatisfy(path ->
+                assertThat(TokenIssuerModule.class.getClassLoader().getResource(path)).as(path).isNotNull());
+    }
 }
