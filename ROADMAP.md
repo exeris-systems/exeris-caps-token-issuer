@@ -29,10 +29,10 @@ capability graph cannot hold a kernel SPI type as a mandatory edge: the tooling 
 on a kernel SPI type as a capability-graph error
 ([exeris-tooling#409](https://github.com/exeris-systems/exeris-tooling/issues/409), open). The wired
 constructor refuses to build without an executor, so the cost today is that the manifest does not
-show a mandatory edge that the constructor enforces. The kernel line `0.13` publishes
+show a mandatory edge that the constructor enforces. Kernel 0.13.1 publishes
 `KernelProviders.TRANSACTIONAL_EXECUTOR` (`exeris-kernel-spi`, `KernelProviders`), which lets the
 module take the executor in `initialize()` instead of through a constructor argument. The capability is built
-against kernel 0.12.0, so this waits on the move to 0.13 and on the tooling fix. Code:
+against kernel 0.13.1, so this waits on the tooling fix. Code:
 `TokenIssuerModule.java`.
 
 ### Rotation atomicity depends on nested transactions
@@ -66,7 +66,7 @@ creation: the capability, the SKU or the operator.
 
 ### No published artefact and no compatibility gate
 
-No artefact is published. The build resolves `exeris-kernel` from GitHub Packages and builds the
+No artefact is published. The build resolves `exeris-kernel`, `exeris-sdk` and `exeris-tooling` from Maven Central and builds the
 sibling capabilities `exeris-caps-service-boundary-core` and `exeris-caps-audit-trail` from their
 default branch (`.github/workflows/build.yml`), so a change there can turn this build red. There is no
 release workflow and no japicmp gate, which needs a previous release as its baseline. This waits on

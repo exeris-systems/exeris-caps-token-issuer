@@ -14,7 +14,7 @@ Operating contract for AI agents working in this repository.
 ## 1. Mission and scope
 
 `exeris-caps-token-issuer` is a single-module Exeris capability (Layer 5 — Domain primitive (identity)). It provides `AccessTokenIssuer`, `JwksPublisher`, `SigningKeyRotation`. Licence: `community` — Apache-2.0
-(ADR-023). It is a proof of concept built against `exeris-kernel` 0.12.0; `README.md` describes
+(ADR-023). It is a proof of concept built against `exeris-kernel` 0.13.1; `README.md` describes
 what it does and does not do.
 
 ## 2. Operating contract and boundaries
