@@ -195,13 +195,11 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
     }
 
     /**
-     * The instant a pending key may start to sign: the later of its planned activation (its expiry
-     * minus one signing period) and the end of the JWKS cache lifetime after its publication.
+     * The instant a pending key may start to sign. While a valid active key exists it is the later of
+     * the pending key's planned activation (its expiry minus one signing period) and the end of the
+     * JWKS cache lifetime after its publication. Without a valid active key there is nothing to wait
+     * for, so the end of the JWKS cache lifetime after publication is enough.
      */
-    private Instant activationInstant(SigningKeyInfo pending) {
-        return activationInstant(pending, false);
-    }
-
     private Instant activationInstant(SigningKeyInfo pending, boolean hasValidActiveKey) {
         Instant published = pending.createdAt().plus(config.jwksMaxAge());
         if (!hasValidActiveKey) {
@@ -265,7 +263,7 @@ public final class DefaultSigningKeyRotation implements SigningKeyRotation {
         List<SigningKeyInfo> waiting = pending.stream().filter(k -> now.isBefore(k.expiresAt())).toList();
         if (active == null) {
             return waiting.isEmpty()
-                    ? (all.isEmpty() ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()), auditEvents) : createPendingKey(now, auditEvents))
+                    ? createKey(KeyState.ACTIVE, now, now.plus(config.keyTtl()), auditEvents)
                     : waiting.get(0);
         }
         if (now.isBefore(active.expiresAt())) {

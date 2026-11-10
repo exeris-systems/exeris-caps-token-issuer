@@ -284,4 +284,43 @@ class DefaultSigningKeyRotationTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("k-unknown");
     }
+
+    @Test
+    @DisplayName("first boot: with no key at all the first key is active at once")
+    void firstBootActivatesImmediately() {
+        SigningKeyInfo first = rotation.rotateIfDue();
+
+        assertThat(first.state()).isEqualTo(KeyState.ACTIVE);
+        assertThat(rotation.listKeyGenerations()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("every key retired with no successor: a fresh key is active at once, as on first boot")
+    void noUsableKeyAndNoSuccessorRecoversWithActiveKey() {
+        SigningKeyInfo first = rotation.ensureActiveKey();
+        repository.updateState(first.kid(), KeyState.RETIRED, clock.instant());
+
+        SigningKeyInfo recovered = rotation.rotateIfDue();
+
+        assertThat(recovered.state()).isEqualTo(KeyState.ACTIVE);
+        assertThat(recovered.kid()).isNotEqualTo(first.kid());
+        assertThat(publishedKids()).containsExactly(recovered.kid());
+    }
+
+    @Test
+    @DisplayName("withdrawing the active key while its successor is still inside the publication lead fails closed until it matures")
+    void withdrawActiveKeyWithImmatureSuccessorWaitsForPublication() {
+        SigningKeyInfo first = rotation.ensureActiveKey();
+        SigningKeyInfo pending = rotation.rotateKeys();
+        clock.advance(config.jwksMaxAge().dividedBy(2));
+
+        rotation.withdrawKey(first.kid());
+
+        assertThat(stateOf(pending.kid()).state()).isEqualTo(KeyState.PENDING);
+        assertThatThrownBy(rotation::rotateIfDue).isInstanceOf(NoActiveKeyException.class);
+        assertThat(inState(KeyState.PENDING)).hasSize(1);
+
+        clock.advance(config.jwksMaxAge().dividedBy(2));
+        assertThat(rotation.rotateIfDue().kid()).isEqualTo(pending.kid());
+    }
 }
