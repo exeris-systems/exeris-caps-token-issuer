@@ -39,12 +39,19 @@ public final class PostgresSigningKeyRepository implements SigningKeyRepository 
         this.envelope = new SigningKeyEnvelope(Objects.requireNonNull(keyring, "keyring must not be null"));
     }
 
+    /** Identifier of the key-encryption key that seals newly stored private keys. */
+    @Override
+    public String activeKekId() {
+        return envelope.activeKekId();
+    }
+
     /**
      * Re-seals every stored private key whose envelope names a KEK other than the active one, so the
      * older KEK can be removed from the keyring afterwards.
      *
      * @return number of records re-sealed
      */
+    @Override
     public int resealWithActiveKek() {
         AtomicInteger count = new AtomicInteger();
         rotateUnderClusterLock(() -> {

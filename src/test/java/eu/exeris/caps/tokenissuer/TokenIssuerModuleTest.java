@@ -299,7 +299,31 @@ class TokenIssuerModuleTest {
         assertThatThrownBy(module::accessTokenIssuer).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(module::jwksPublisher).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(module::signingKeyRotation).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> module.withdrawKey("k-1")).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(module::resealWithActiveKek).isInstanceOf(IllegalStateException.class);
         module.terminate();
+    }
+
+    @Test
+    @DisplayName("module resealWithActiveKek returns zero for in-memory development keys")
+    void moduleResealWithActiveKekInMemory() {
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_MANUAL_ENV, null, null, null);
+        assertThat(module.resealWithActiveKek()).isZero();
+        assertThat(module.signingKeyRotation().resealWithActiveKek()).isZero();
+    }
+
+    @Test
+    @DisplayName("module withdrawKey withdraws the named key through its rotation service")
+    void moduleWithdrawKey() throws Exception {
+        TokenIssuerModule module = TokenIssuerModule.inMemoryForDevelopment(
+                DevelopmentKeys.UNSEALED_ACKNOWLEDGED, DEV_MANUAL_ENV, null, null, null);
+        module.initialize();
+        module.ready();
+        String kid = module.signingKeyRotation().rotateIfDue().kid();
+        module.withdrawKey(kid);
+        assertThatThrownBy(() -> module.signingKeyRotation().activeKey())
+                .isInstanceOf(eu.exeris.caps.tokenissuer.api.exception.NoActiveKeyException.class);
     }
 
     @Test
